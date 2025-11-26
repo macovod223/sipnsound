@@ -4,19 +4,33 @@ import { Switch } from './ui/switch';
 import { useSettings } from './SettingsContext';
 import { toast } from 'sonner';
 import { Language } from './translations';
-import { useState } from 'react';
 
 export function SettingsView() {
   const settings = useSettings();
   const { t } = settings;
-  const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   
   const languageOptions: Language[] = ['English', 'Русский'];
 
   // Helper to show toast on setting change
   const handleSettingChange = (settingName: string, value: boolean | string) => {
-    const status = typeof value === 'boolean' ? (value ? t('enabled' as any) || 'enabled' : t('disabled' as any) || 'disabled') : value;
-    toast.success(`${settingName} ${typeof value === 'boolean' ? status : ''}${typeof value === 'string' ? `: ${status}` : ''}`, {
+    let status: string;
+    let displayName: string = settingName;
+    
+    if (typeof value === 'boolean') {
+      status = value ? t('enabled' as any) || 'enabled' : t('disabled' as any) || 'disabled';
+    } else {
+      // Для языка показываем правильный формат
+      if (value === 'Русский') {
+        status = 'Русский';
+        displayName = 'Язык';
+      } else if (value === 'English') {
+        status = 'English';
+        displayName = 'Language';
+      } else {
+        status = String(value);
+      }
+    }
+    toast.success(`${displayName}${typeof value === 'string' ? `: ${status}` : ` ${status}`}`, {
       duration: 2000,
       style: {
         background: 'rgba(24, 24, 24, 0.95)',
@@ -192,8 +206,8 @@ export function SettingsView() {
         {/* Language */}
         <motion.section
           {...getMotionProps(0.1)}
-          className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-5 md:p-6"
-          style={{ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)' }}
+          className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-5 md:p-6 relative"
+          style={{ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)', zIndex: 100 }}
         >
           <div className="flex items-center gap-3 mb-4 sm:mb-5">
             <div
@@ -211,36 +225,20 @@ export function SettingsView() {
           <div className="space-y-4 sm:space-y-5">
             <div className="flex items-center justify-between gap-4 py-2">
               <label className="text-white text-sm sm:text-base">{t('language')}</label>
-              <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowLanguageMenu(!showLanguageMenu);
-                  }}
-                  className="glass rounded-lg px-3 sm:px-4 py-2 text-white text-sm sm:text-base opacity-70 hover:opacity-100 fast-transition"
-                >
-                  {settings.language}
-                </button>
-                {showLanguageMenu && (
-                  <div className="absolute right-0 mt-2 glass-strong rounded-lg overflow-hidden min-w-[140px] z-[9999]">
-                    {languageOptions.map((option) => (
-                      <button
-                        key={option}
-                        onClick={() => {
-                          settings.setLanguage(option);
-                          handleSettingChange(t('language'), option);
-                          setShowLanguageMenu(false);
-                        }}
-                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-white/10 fast-transition ${
-                          settings.language === option ? 'text-[#1ED760]' : 'text-white opacity-70'
-                        }`}
-                      >
-                        {option}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Переключаем язык напрямую
+                  const currentIndex = languageOptions.indexOf(settings.language);
+                  const nextIndex = (currentIndex + 1) % languageOptions.length;
+                  const nextLanguage = languageOptions[nextIndex];
+                  settings.setLanguage(nextLanguage);
+                  handleSettingChange(t('language'), nextLanguage);
+                }}
+                className="glass rounded-lg px-3 sm:px-4 py-2 text-white text-sm sm:text-base opacity-70 hover:opacity-100 fast-transition"
+              >
+                {settings.language}
+              </button>
             </div>
           </div>
         </motion.section>
@@ -248,9 +246,10 @@ export function SettingsView() {
         {/* About section */}
         <motion.section
           {...getMotionProps(0.15)}
-          className="glass-card rounded-xl sm:rounded-2xl p-6 sm:p-8 md:p-10 text-center"
+          className="glass-card rounded-xl sm:rounded-2xl p-6 sm:p-8 md:p-10 text-center relative"
           style={{
             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            zIndex: 1,
           }}
         >
           {/* Coffee cup icon */}

@@ -50,7 +50,7 @@ export function CompactSidebar({ activeView, onViewChange, onCreatePlaylist }: C
           title={user?.username}
         >
           <ImageWithFallback
-            src={user?.avatar || 'https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?w=400'}
+            src={user?.avatarUrl || 'https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?w=400'}
             alt={user?.username || 'User'}
             className="w-full h-full object-cover"
           />

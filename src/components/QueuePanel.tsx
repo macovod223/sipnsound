@@ -1,8 +1,9 @@
 import { motion } from 'motion/react';
-import { X, Clock, GripVertical } from 'lucide-react';
+import { X, GripVertical } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import { usePlayer, playlistsData } from './PlayerContext';
+import { usePlayer } from './PlayerContext';
 import { useSettings } from './SettingsContext';
+import { formatTime } from '../utils/time';
 
 interface QueuePanelProps {
   isOpen: boolean;
@@ -10,7 +11,7 @@ interface QueuePanelProps {
 }
 
 export function QueuePanel({ isOpen, onClose }: QueuePanelProps) {
-  const { currentTrack, setCurrentTrack } = usePlayer();
+  const { currentTrack, setCurrentTrack, queue, removeFromQueue, getNextTrackFromPlaylist } = usePlayer();
   const { t } = useSettings();
   const [width, setWidth] = useState(360);
   const [isDragging, setIsDragging] = useState(false);
@@ -19,35 +20,16 @@ export function QueuePanel({ isOpen, onClose }: QueuePanelProps) {
 
   if (!isOpen) return null;
 
-  // Get current playlist name from track
-  const currentPlaylistName = currentTrack?.playlistTitle || 'LyfeStyle';
-  const currentPlaylistTracks = playlistsData[currentPlaylistName] || [];
-  
-  // Find current track index - more reliable search
-  const currentIndex = currentTrack 
-    ? currentPlaylistTracks.findIndex(t => 
-        t.title === currentTrack.title || 
-        t.title.includes(currentTrack.title) ||
-        currentTrack.title.includes(t.title)
-      )
-    : -1;
+  // Проверяем, что currentTrack существует перед рендерингом
+  if (!currentTrack) {
+    return null;
+  }
 
-  // Next track in queue
-  const nextTrack = currentIndex >= 0 && currentIndex < currentPlaylistTracks.length - 1
-    ? currentPlaylistTracks[currentIndex + 1]
-    : null;
+  // Next track: сначала из очереди, потом из плейлиста
+  const nextTrack = queue.length > 0 ? queue[0] : getNextTrackFromPlaylist();
   
   // Rest of queue (after next track)
-  const upcomingTracks = currentIndex >= 0 && currentIndex < currentPlaylistTracks.length - 2
-    ? currentPlaylistTracks.slice(currentIndex + 2, currentIndex + 10)
-    : [];
-
-  // Format time
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  const upcomingTracks = queue.length > 1 ? queue.slice(1, 10) : [];
 
   // Resize handler
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -168,8 +150,7 @@ export function QueuePanel({ isOpen, onClose }: QueuePanelProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-5 scrollbar-hide">
-        {currentTrack ? (
-          <>
+        <>
             {/* Current Track Section */}
             <div>
               <h3 
@@ -181,7 +162,7 @@ export function QueuePanel({ isOpen, onClose }: QueuePanelProps) {
                   letterSpacing: '0.1em',
                 }}
               >
-                {t('nowPlaying')} {t('playingFrom')} {currentPlaylistName}
+                {t('nowPlaying')} {currentTrack.playlistTitle ? `${t('playingFrom')} ${currentTrack.playlistTitle}` : ''}
               </h3>
               
               {/* Large Cover */}
@@ -241,7 +222,11 @@ export function QueuePanel({ isOpen, onClose }: QueuePanelProps) {
                 <motion.div
                   whileHover={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }}
                   className="flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors"
-                  onClick={() => setCurrentTrack(nextTrack, currentPlaylistName)}
+                  onClick={() => {
+                    setCurrentTrack(nextTrack, nextTrack.playlistTitle || '');
+                    removeFromQueue(0);
+                    // setCurrentTrack автоматически запускает воспроизведение
+                  }}
                 >
                   {/* Small Cover */}
                   <img
@@ -300,7 +285,7 @@ export function QueuePanel({ isOpen, onClose }: QueuePanelProps) {
                     letterSpacing: '0.1em',
                   }}
                 >
-                  Coming Up
+                  {t('nextUp')}
                 </h3>
                 
                 <div className="space-y-1">
@@ -309,7 +294,11 @@ export function QueuePanel({ isOpen, onClose }: QueuePanelProps) {
                       key={idx}
                       whileHover={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }}
                       className="flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors"
-                      onClick={() => setCurrentTrack(track, currentPlaylistName)}
+                      onClick={() => {
+                        setCurrentTrack(track, track.playlistTitle || '');
+                        removeFromQueue(idx + 1);
+                        // setCurrentTrack автоматически запускает воспроизведение
+                      }}
                     >
                       {/* Small Cover */}
                       <img
@@ -354,13 +343,7 @@ export function QueuePanel({ isOpen, onClose }: QueuePanelProps) {
                 </div>
               </div>
             )}
-          </>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full" style={{ color: '#7a7a7a' }}>
-            <Clock size={48} className="mb-4 opacity-50" />
-            <p className="text-sm">No track playing</p>
-          </div>
-        )}
+        </>
       </div>
       </div>
     </>

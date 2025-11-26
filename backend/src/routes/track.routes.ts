@@ -5,8 +5,10 @@ import {
   streamTrack,
   getTrackLyrics,
   streamLocalFile,
+  likeTrack,
+  unlikeTrack,
 } from '../controllers/track.controller';
-import { authenticate, optionalAuth } from '../middlewares/auth.middleware';
+import { optionalAuth, authenticate } from '../middlewares/auth.middleware';
 
 const router = Router();
 
@@ -22,13 +24,11 @@ router.get('/:id/stream', optionalAuth, streamTrack);
 // Получить текст песни (LRC)
 router.get('/:id/lyrics', optionalAuth, getTrackLyrics);
 
+// Лайк/анлайк трека
+router.post('/:id/like', authenticate, likeTrack);
+router.delete('/:id/like', authenticate, unlikeTrack);
+
 // Стриминг локального файла (аудио/обложка)
 router.get('/file/:type/:filename', streamLocalFile);
-
-// TODO: Добавить позже
-// POST /upload - Загрузка трека (требуется аутентификация)
-// PUT /:id - Обновление трека
-// DELETE /:id - Удаление трека
-// POST /:id/play - Записать воспроизведение
 
 export default router;

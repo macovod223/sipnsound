@@ -1,5 +1,3 @@
-// Prisma Schema для Sip&Sound
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,170 +7,195 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Модель пользователя
 model User {
-  id            String         @id @default(uuid())
-  username      String         @unique
-  email         String         @unique
-  passwordHash  String         @map("password_hash")
-  displayName   String?        @map("display_name")
-  avatarUrl     String?        @map("avatar_url")
-  
-  // Relationships
-  playlists     Playlist[]
-  likedTracks   LikedTrack[]
-  playHistory   PlayHistory[]
-  uploadedTracks Track[]       @relation("UploadedBy")
-  
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
+  id                String           @id @default(uuid())
+  username          String           @unique
+  email             String           @unique
+  passwordHash      String           @map("password_hash")
+  displayName       String?          @map("display_name")
+  avatarUrl         String?          @map("avatar_url")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  isVerified        Boolean          @default(false) @map("is_verified")
+  role              UserRole         @default(USER)
+  subscription_type SubscriptionType @default(FREE)
+  following         Following[]
+  likedTracks       LikedTrack[]
+  playHistory       PlayHistory[]
+  playlists         Playlist[]
+  queue             QueueTrack[]
+  uploadedTracks    Track[]          @relation("UploadedBy")
 
   @@map("users")
 }
 
-// Модель артиста
 model Artist {
-  id                String          @id @default(uuid())
-  name              String          @unique
-  bio               String?
-  imageUrl          String?         @map("image_url")
-  imagePath         String?         @map("image_path")
-  verified          Boolean         @default(false)
-  monthlyListeners  Int             @default(0) @map("monthly_listeners")
-  
-  // Relationships
-  tracks            Track[]
-  albums            Album[]
-  
-  createdAt         DateTime        @default(now()) @map("created_at")
-  updatedAt         DateTime        @updatedAt @map("updated_at")
+  id               String      @id @default(uuid())
+  name             String      @unique
+  bio              String?
+  imageUrl         String?     @map("image_url")
+  imagePath        String?     @map("image_path")
+  verified         Boolean     @default(false)
+  monthlyListeners Int         @default(0) @map("monthly_listeners")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  albums           Album[]
+  followers        Following[]
+  tracks           Track[]
 
   @@map("artists")
 }
 
-// Модель альбома
 model Album {
-  id            String          @id @default(uuid())
-  title         String
-  year          Int
-  type          String          @default("album") // "album" | "single" | "ep"
-  coverUrl      String?         @map("cover_url")
-  coverPath     String?         @map("cover_path")
-  
-  // Relationships
-  artist        Artist          @relation(fields: [artistId], references: [id])
-  artistId      String          @map("artist_id")
-  tracks        Track[]
-  
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
+  id        String   @id @default(uuid())
+  title     String
+  year      Int
+  type      String   @default("album")
+  coverUrl  String?  @map("cover_url")
+  coverPath String?  @map("cover_path")
+  artistId  String   @map("artist_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  artist    Artist   @relation(fields: [artistId], references: [id])
+  tracks    Track[]
 
   @@map("albums")
 }
 
-// Модель трека
 model Track {
-  id            String          @id @default(uuid())
-  title         String
-  artistName    String          @map("artist_name")    // Название артиста (строка)
-  albumName     String?         @map("album_name")     // Название альбома (строка)
-  genre         String?
-  duration      Int             // Длительность в секундах
-  audioUrl      String          @map("audio_url")      // URL или путь к аудио
-  audioPath     String?         @map("audio_path")     // Локальный путь к файлу
-  coverUrl       String?         @map("cover_url")      // URL или путь к обложке
-  coverPath     String?         @map("cover_path")     // Локальный путь к обложке
-  lyricsPath    String?         @map("lyrics_path")    // Путь к LRC файлу
-  lyrics        Json?           // JSON с временными метками (парсится из LRC)
-  playsCount    Int             @default(0) @map("plays_count")
-  
-  // Relationships
-  uploadedBy    User?           @relation("UploadedBy", fields: [uploadedById], references: [id])
-  uploadedById  String?         @map("uploaded_by")
-  artist        Artist?         @relation(fields: [artistId], references: [id])
-  artistId      String?         @map("artist_id")
-  album         Album?          @relation(fields: [albumId], references: [id])
-  albumId       String?         @map("album_id")
-  playlists     PlaylistTrack[]
-  likedBy       LikedTrack[]
-  playHistory   PlayHistory[]
-  
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
+  id           String          @id @default(uuid())
+  title        String
+  duration     Int
+  audioUrl     String          @map("audio_url")
+  audioPath    String?         @map("audio_path")
+  coverUrl     String?         @map("cover_url")
+  coverPath    String?         @map("cover_path")
+  lyricsPath   String?         @map("lyrics_path")
+  lyrics       Json?
+  playsCount   Int             @default(0) @map("plays_count")
+  uploadedById String?         @map("uploaded_by")
+  artistId     String          @map("artist_id")
+  albumId      String?         @map("album_id")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  genreId      String?         @map("genre_id")
+  isExplicit   Boolean         @default(false) @map("is_explicit")
+  isPublished  Boolean         @default(true) @map("is_published")
+  likedBy      LikedTrack[]
+  playHistory  PlayHistory[]
+  playlists    PlaylistTrack[]
+  queueTracks  QueueTrack[]
+  album        Album?          @relation(fields: [albumId], references: [id])
+  artist       Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  genre        Genre?          @relation(fields: [genreId], references: [id])
+  uploadedBy   User?           @relation("UploadedBy", fields: [uploadedById], references: [id])
 
-  @@index([artistName])
-  @@index([genre])
-  @@index([uploadedById])
   @@index([artistId])
   @@index([albumId])
+  @@index([genreId])
+  @@index([uploadedById])
+  @@index([playsCount])
   @@map("tracks")
 }
 
-// Модель плейлиста
 model Playlist {
   id          String          @id @default(uuid())
   title       String
   description String?
   coverUrl    String?         @map("cover_url")
   isPublic    Boolean         @default(true) @map("is_public")
-  
-  // Relationships
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId      String          @map("user_id")
-  tracks      PlaylistTrack[]
-  
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
+  tracks      PlaylistTrack[]
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("playlists")
 }
 
-// Связь многие-ко-многим между плейлистами и треками
 model PlaylistTrack {
-  id          String   @id @default(uuid())
-  
-  playlist    Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
-  playlistId  String   @map("playlist_id")
-  
-  track       Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
-  trackId     String   @map("track_id")
-  
-  position    Int      // Позиция трека в плейлисте
-  addedAt     DateTime @default(now()) @map("added_at")
+  id         String   @id @default(uuid())
+  playlistId String   @map("playlist_id")
+  trackId    String   @map("track_id")
+  position   Int
+  addedAt    DateTime @default(now()) @map("added_at")
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
 
   @@unique([playlistId, trackId])
   @@map("playlist_tracks")
 }
 
-// Лайкнутые треки
 model LikedTrack {
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId   String   @map("user_id")
-  
-  track    Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
-  trackId  String   @map("track_id")
-  
-  likedAt  DateTime @default(now()) @map("liked_at")
+  userId  String   @map("user_id")
+  trackId String   @map("track_id")
+  likedAt DateTime @default(now()) @map("liked_at")
+  track   Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, trackId])
   @@map("liked_tracks")
 }
 
-// История прослушивания
 model PlayHistory {
   id       String   @id @default(uuid())
-  
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId   String   @map("user_id")
-  
-  track    Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
   trackId  String   @map("track_id")
-  
   playedAt DateTime @default(now()) @map("played_at")
+  track    Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([playedAt])
   @@map("play_history")
 }
 
+model Genre {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  imageUrl    String?  @map("image_url")
+  color       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  tracks      Track[]
+
+  @@map("genres")
+}
+
+model Following {
+  userId     String   @map("user_id")
+  artistId   String   @map("artist_id")
+  followedAt DateTime @default(now()) @map("followed_at")
+  artist     Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, artistId])
+  @@map("following")
+}
+
+model QueueTrack {
+  id       String   @id @default(uuid())
+  userId   String   @map("user_id")
+  trackId  String   @map("track_id")
+  position Int
+  addedAt  DateTime @default(now()) @map("added_at")
+  track    Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("queue_tracks")
+}
+
+enum UserRole {
+  USER
+  ARTIST
+  ADMIN
+}
+
+enum SubscriptionType {
+  FREE
+  PREMIUM
+  FAMILY
+}

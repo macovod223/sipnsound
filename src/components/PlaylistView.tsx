@@ -1,177 +1,304 @@
 import { motion } from 'motion/react';
-import { ArrowLeft, Play, Pause, Clock, Heart } from 'lucide-react';
+import { ArrowLeft, Play, Clock, Heart, Shuffle } from 'lucide-react';
 import { usePlayer } from './PlayerContext';
-import { AnimatedGradientText, MusicVisualizer } from './UI';
+import { MusicVisualizer } from './UI';
 import { useSettings } from './SettingsContext';
 import { useState, useEffect } from 'react';
-
-// Mock songs data
-const playlistSongs: { [key: string]: Array<{
-  id: number;
-  title: string;
-  artist: string;
-  duration: string;
-  album: string;
-  image: string;
-}> } = {
-  'Liked Songs': [
-    { id: 1, title: 'Starboy', artist: 'The Weeknd', duration: '3:50', album: 'Starboy', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 2, title: 'Blinding Lights', artist: 'The Weeknd', duration: '3:20', album: 'After Hours', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 3, title: 'Save Your Tears', artist: 'The Weeknd', duration: '3:35', album: 'After Hours', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 4, title: 'Die For You', artist: 'The Weeknd', duration: '4:20', album: 'Starboy', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 5, title: 'Sacrifice', artist: 'The Weeknd', duration: '3:08', album: 'Dawn FM', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-    { id: 6, title: 'Moth To A Flame', artist: 'Swedish House Mafia, The Weeknd', duration: '3:45', album: 'Paradise Again', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 7, title: 'Take My Breath', artist: 'The Weeknd', duration: '5:40', album: 'Dawn FM', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 8, title: 'Less Than Zero', artist: 'The Weeknd', duration: '3:31', album: 'Dawn FM', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 9, title: 'Out of Time', artist: 'The Weeknd', duration: '3:34', album: 'Dawn FM', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 10, title: 'Gasoline', artist: 'The Weeknd', duration: '3:32', album: 'Dawn FM', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-  ],
-  'Daily Mix 1': [
-    { id: 1, title: 'SICKO MODE', artist: 'Travis Scott', duration: '5:12', album: 'ASTROWORLD', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 2, title: 'goosebumps', artist: 'Travis Scott', duration: '4:03', album: 'Birds in the Trap', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 3, title: 'HIGHEST IN THE ROOM', artist: 'Travis Scott', duration: '2:57', album: 'Single', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 4, title: 'Antidote', artist: 'Travis Scott', duration: '4:21', album: 'Rodeo', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 5, title: 'Butterfly Effect', artist: 'Travis Scott', duration: '3:10', album: 'ASTROWORLD', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-    { id: 6, title: 'Praise The Lord', artist: 'A$AP Rocky', duration: '3:31', album: 'Testing', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 7, title: 'HUMBLE.', artist: 'Kendrick Lamar', duration: '2:57', album: 'DAMN.', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 8, title: 'DNA.', artist: 'Kendrick Lamar', duration: '3:05', album: 'DAMN.', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 9, title: 'L$D', artist: 'A$AP Rocky', duration: '3:58', album: 'AT.LONG.LAST.A$AP', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 10, title: 'STARGAZING', artist: 'Travis Scott', duration: '4:30', album: 'ASTROWORLD', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-  ],
-  'Peaceful Piano': [
-    { id: 1, title: 'River Flows in You', artist: 'Yiruma', duration: '3:37', album: 'First Love', image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400' },
-    { id: 2, title: 'Comptine d\'un autre été', artist: 'Yann Tiersen', duration: '2:18', album: 'Amélie', image: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=400' },
-    { id: 3, title: 'Clair de Lune', artist: 'Claude Debussy', duration: '5:03', album: 'Suite bergamasque', image: 'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=400' },
-    { id: 4, title: 'Gymnopédie No.1', artist: 'Erik Satie', duration: '3:32', album: 'Trois Gymnopédies', image: 'https://images.unsplash.com/photo-1509824227185-9c5a01ceba0d?w=400' },
-    { id: 5, title: 'Kiss the Rain', artist: 'Yiruma', duration: '4:32', album: 'First Love', image: 'https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=400' },
-    { id: 6, title: 'Nocturne Op.9 No.2', artist: 'Frédéric Chopin', duration: '4:30', album: 'Nocturnes', image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400' },
-    { id: 7, title: 'May Be', artist: 'Yiruma', duration: '3:40', album: 'First Love', image: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=400' },
-    { id: 8, title: 'Nuvole Bianche', artist: 'Ludovico Einaudi', duration: '5:57', album: 'Una Mattina', image: 'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=400' },
-    { id: 9, title: 'Primavera', artist: 'Ludovico Einaudi', duration: '3:48', album: 'Divenire', image: 'https://images.unsplash.com/photo-1509824227185-9c5a01ceba0d?w=400' },
-    { id: 10, title: 'Una Mattina', artist: 'Ludovico Einaudi', duration: '5:26', album: 'Una Mattina', image: 'https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=400' },
-  ],
-  'This Is Yeat': [
-    { id: 1, title: 'Sorry Bout That', artist: 'Yeat', duration: '2:42', album: '2 Alive', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 2, title: 'Mad bout that', artist: 'Yeat', duration: '2:28', album: 'Up 2 Më', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 3, title: 'Poppin', artist: 'Yeat', duration: '2:15', album: '2 Alive', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-    { id: 4, title: 'Talk', artist: 'Yeat', duration: '2:34', album: 'Up 2 Më', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 5, title: 'Get Busy', artist: 'Yeat', duration: '2:45', album: '2 Alive', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 6, title: 'Money Twerk', artist: 'Yeat', duration: '2:52', album: '2 Alive', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 7, title: 'Géëk high', artist: 'Yeat', duration: '2:38', album: '2 Alive', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 8, title: 'Turban', artist: 'Yeat', duration: '2:23', album: 'Up 2 Më', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-    { id: 9, title: 'Out thë way', artist: 'Yeat', duration: '2:32', album: '2 Alive', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 10, title: 'Up 2 Më', artist: 'Yeat', duration: '2:48', album: 'Up 2 Më', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-  ],
-  'From Sparta to Padre': [
-    { id: 1, title: 'Epic Journey', artist: 'Two Steps From Hell', duration: '4:08', album: 'Battlecry', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-    { id: 2, title: 'Victory', artist: 'Two Steps From Hell', duration: '3:55', album: 'Archangel', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 3, title: 'Heart of Courage', artist: 'Two Steps From Hell', duration: '3:20', album: 'Invincible', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 4, title: 'Protectors of the Earth', artist: 'Two Steps From Hell', duration: '3:48', album: 'Invincible', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 5, title: 'To Glory', artist: 'Two Steps From Hell', duration: '3:35', album: 'SkyWorld', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 6, title: 'Archangel', artist: 'Two Steps From Hell', duration: '4:02', album: 'Archangel', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-    { id: 7, title: 'Strength of a Thousand Men', artist: 'Two Steps From Hell', duration: '3:15', album: 'Archangel', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 8, title: 'Star Sky', artist: 'Two Steps From Hell', duration: '4:28', album: 'SkyWorld', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 9, title: 'United We Stand', artist: 'Two Steps From Hell', duration: '3:42', album: 'Invincible', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 10, title: 'Black Blade', artist: 'Two Steps From Hell', duration: '4:15', album: 'Archangel', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 11, title: 'Immortal', artist: 'Two Steps From Hell', duration: '3:58', album: 'Battlecry', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-    { id: 12, title: 'Rebirth', artist: 'Two Steps From Hell', duration: '4:22', album: 'Archangel', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-  ],
-  'DJ': [
-    { id: 1, title: 'One More Time', artist: 'Daft Punk', duration: '5:20', album: 'Discovery', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 2, title: 'Around The World', artist: 'Daft Punk', duration: '7:09', album: 'Homework', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 3, title: 'Levels', artist: 'Avicii', duration: '3:18', album: 'True', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 4, title: 'Wake Me Up', artist: 'Avicii', duration: '4:09', album: 'True', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 5, title: 'Animals', artist: 'Martin Garrix', duration: '5:02', album: 'Single', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-    { id: 6, title: 'Titanium', artist: 'David Guetta ft. Sia', duration: '4:05', album: 'Nothing But The Beat', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 7, title: 'Don\'t You Worry Child', artist: 'Swedish House Mafia', duration: '6:43', album: 'Until Now', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 8, title: 'Clarity', artist: 'Zedd ft. Foxes', duration: '4:32', album: 'Clarity', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 9, title: 'Summer', artist: 'Calvin Harris', duration: '3:43', album: 'Motion', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 10, title: 'This Is What You Came For', artist: 'Calvin Harris ft. Rihanna', duration: '3:42', album: 'Single', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-  ],
-  'Tea Lovers': [
-    { id: 1, title: 'Lofi Hip Hop Beat 1', artist: 'ChilledCow', duration: '2:45', album: 'Lofi Collection', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 2, title: 'Coffee Shop Jazz', artist: 'Jazz Vibes', duration: '3:12', album: 'Relaxing Moments', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 3, title: 'Rainy Day', artist: 'Lofi Beats', duration: '2:58', album: 'Chill Vibes', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-    { id: 4, title: 'Study Time', artist: 'Focus Music', duration: '3:20', album: 'Concentration', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-    { id: 5, title: 'Green Tea Dreams', artist: 'Ambient Sounds', duration: '4:05', album: 'Tea House', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-    { id: 6, title: 'Morning Brew', artist: 'Chill Beats', duration: '2:48', album: 'Daily Routine', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-    { id: 7, title: 'Afternoon Delight', artist: 'Relax Master', duration: '3:35', album: 'Peace', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-    { id: 8, title: 'Evening Meditation', artist: 'Zen Music', duration: '4:22', album: 'Mindfulness', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-  ],
-};
-
-// Default songs for playlists without specific data
-const defaultSongs = [
-  { id: 1, title: 'Track 1', artist: 'Artist 1', duration: '3:45', album: 'Album 1', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400' },
-  { id: 2, title: 'Track 2', artist: 'Artist 2', duration: '4:12', album: 'Album 2', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400' },
-  { id: 3, title: 'Track 3', artist: 'Artist 3', duration: '3:28', album: 'Album 3', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400' },
-  { id: 4, title: 'Track 4', artist: 'Artist 4', duration: '3:55', album: 'Album 4', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400' },
-  { id: 5, title: 'Track 5', artist: 'Artist 5', duration: '4:02', album: 'Album 5', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400' },
-];
+import { apiClient } from '../api/client';
+import { resolveAudioUrl, resolveImageUrl } from '@/utils/media';
+import { TrackMenu } from './TrackMenu';
+import { formatDuration } from '../utils/time';
 
 export function PlaylistView() {
-  const { selectedPlaylist, closePlaylist, setCurrentTrack, currentTrack, isPlaying, togglePlay, openArtistView, apiTracks } = usePlayer();
+  const { selectedPlaylist, closePlaylist, setCurrentTrack, currentTrack, isPlaying, togglePlay, openArtistView, openPlaylist, likedTracksList, seek, shuffle, toggleShuffle, setCurrentPlaylistTracks } = usePlayer();
   const { t } = useSettings();
   const [playlistTracks, setPlaylistTracks] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [playlistCoverUrl, setPlaylistCoverUrl] = useState<string | null>(null);
+  
+  // Обновляем обложку при изменении selectedPlaylist
+  useEffect(() => {
+    if (selectedPlaylist?.image) {
+      setPlaylistCoverUrl(resolveImageUrl(selectedPlaylist.image) || null);
+    } else {
+      setPlaylistCoverUrl(null);
+    }
+  }, [selectedPlaylist?.image]);
 
   // Load tracks for the selected playlist
   useEffect(() => {
     if (!selectedPlaylist) return;
 
     const loadPlaylistTracks = async () => {
-      setIsLoading(true);
       try {
-        // First try to fetch from API
-        const response = await fetch(`http://localhost:3001/api/playlists/${encodeURIComponent(selectedPlaylist.title)}/tracks`);
-        if (response.ok) {
-          const tracks = await response.json();
-          setPlaylistTracks(tracks);
-        } else {
-          // Fallback to mock data or empty array
-          const mockTracks = playlistSongs[selectedPlaylist.title] || defaultSongs;
-          setPlaylistTracks(mockTracks);
+        // Если это альбом, загружаем треки по albumId
+        if (selectedPlaylist.albumId) {
+          const response = await apiClient.getTracks({ albumId: selectedPlaylist.albumId });
+          if (response && response.tracks && response.tracks.length > 0) {
+            // Используем обложку альбома из selectedPlaylist для всех треков
+            const albumCover = selectedPlaylist.image || response.tracks[0]?.album?.coverUrl || '';
+            const formattedTracks = response.tracks.map((track: any) => ({
+              id: track.id,
+              title: track.title,
+              artist: track.artist?.name || 'Unknown Artist',
+              image: albumCover || track.coverUrl || track.coverPath || (track.album as any)?.coverUrl || '',
+              genre: track.genre?.name || 'Unknown',
+              duration: track.duration || 0,
+              audioUrl: resolveAudioUrl(track.audioUrl || track.audioPath),
+              lyricsUrl: track.lyricsPath,
+              playsCount: track.playsCount || 0,
+              album: track.album?.title || 'Unknown Album',
+            }));
+            setPlaylistTracks(formattedTracks);
+            // Сохраняем треки в контекст для nextTrack
+            setCurrentPlaylistTracks(formattedTracks.map((track: any) => ({
+              id: track.id,
+              title: track.title,
+              artist: track.artist,
+              image: track.image,
+              genre: track.genre || 'Unknown',
+              duration: track.duration || 0,
+              audioUrl: track.audioUrl,
+              playlistTitle: selectedPlaylist.title,
+            })));
+            return;
+          }
         }
+        
+        // Если это "Liked Songs", загружаем лайкнутые треки из API
+        if (selectedPlaylist.type === 'liked') {
+          try {
+            const response = await apiClient.getLikedTracks();
+            if (response && response.tracks && response.tracks.length > 0) {
+              const formattedTracks = response.tracks.map((track: any) => ({
+                id: track.id,
+                title: track.title,
+                artist: typeof track.artist === 'string' ? track.artist : (track.artist?.name || 'Unknown Artist'),
+                artistId: typeof track.artist === 'object' ? track.artist?.id : undefined,
+                image: track.image || track.coverUrl || track.coverPath || '',
+                genre: typeof track.genre === 'string' ? track.genre : (track.genre?.name || 'Unknown'),
+                duration: track.duration || 0,
+                audioUrl: resolveAudioUrl(track.audioUrl || track.audioPath),
+                lyricsUrl: track.lyricsUrl || track.lyricsPath,
+                playsCount: track.playsCount || 0,
+                album: typeof track.album === 'string' ? track.album : (track.album?.title || 'Unknown Album'),
+                albumId: typeof track.album === 'object' ? track.album?.id : undefined,
+                albumType: typeof track.album === 'object' ? track.album?.type : undefined,
+              }));
+              setPlaylistTracks(formattedTracks);
+              // Сохраняем треки в контекст для nextTrack
+              setCurrentPlaylistTracks(formattedTracks.map((track: any) => ({
+                id: track.id,
+                title: track.title,
+                artist: track.artist,
+                image: track.image,
+                genre: track.genre || 'Unknown',
+                duration: track.duration || 0,
+                audioUrl: track.audioUrl,
+                playlistTitle: selectedPlaylist.title,
+              })));
+              return;
+            }
+          } catch (error) {
+            // Если не удалось загрузить, используем треки из контекста
+          }
+          // Fallback: используем треки из контекста
+          if (likedTracksList && likedTracksList.length > 0) {
+            setPlaylistTracks(likedTracksList);
+            setCurrentPlaylistTracks(likedTracksList);
+            return;
+          }
+          // Если лайкнутых треков нет, показываем пустой список
+          setPlaylistTracks([]);
+          return;
+        }
+        
+        // Иначе пытаемся загрузить как плейлист
+        // Если есть ID плейлиста, используем его, иначе пытаемся найти по title
+        if (selectedPlaylist.id) {
+          try {
+            const playlistResponse = await apiClient.getPlaylistById(selectedPlaylist.id);
+            if (playlistResponse) {
+              // API возвращает PlaylistDetails напрямую (getPlaylistById уже извлекает playlist из ответа)
+              const playlist = playlistResponse;
+              // Обновляем обложку плейлиста из БД
+              if (playlist.coverUrl) {
+                setPlaylistCoverUrl(resolveImageUrl(playlist.coverUrl) || null);
+              }
+              
+              const tracks = playlist.tracks || [];
+              if (tracks.length > 0) {
+                const formattedTracks = tracks.map((pt: any) => {
+                  const track = pt.track || pt;
+                  // Обрабатываем разные форматы данных из API
+                  const artistName = track.artist?.name || (typeof track.artist === 'string' ? track.artist : 'Unknown Artist');
+                  const albumTitle = track.album?.title || (typeof track.album === 'string' ? track.album : 'Unknown Album');
+                  return {
+                    id: track.id,
+                    title: track.title,
+                    artist: artistName,
+                    image: resolveImageUrl(track.coverUrl || track.coverPath) || selectedPlaylist.image || '',
+                    genre: track.genre?.name || 'Unknown',
+                    duration: track.duration || 0,
+                    audioUrl: resolveAudioUrl(track.audioUrl || track.audioPath),
+                    lyricsUrl: track.lyricsPath,
+                    playsCount: track.playsCount || 0,
+                    album: albumTitle,
+                  };
+                });
+                setPlaylistTracks(formattedTracks);
+                // Сохраняем треки в контекст для nextTrack
+                setCurrentPlaylistTracks(formattedTracks.map((track: any) => ({
+                  id: track.id,
+                  title: track.title,
+                  artist: track.artist,
+                  image: track.image,
+                  genre: track.genre || 'Unknown',
+                  duration: track.duration || 0,
+                  audioUrl: track.audioUrl,
+                  playlistTitle: selectedPlaylist.title,
+                })));
+                return;
+              }
+            }
+          } catch (error) {
+            // Если не удалось загрузить по ID, пробуем по title
+          }
+        }
+        
+        // Fallback: пытаемся найти плейлист по title
+        try {
+          const playlists = await apiClient.getPlaylists();
+          const playlist = playlists.find((p: any) => p.title === selectedPlaylist.title);
+          if (playlist && playlist.id) {
+              const playlistResponse = await apiClient.getPlaylistById(playlist.id);
+            if (playlistResponse) {
+              // API возвращает PlaylistDetails напрямую (getPlaylistById уже извлекает playlist из ответа)
+              const playlistData = playlistResponse;
+              // Обновляем обложку плейлиста из БД
+              if (playlistData.coverUrl) {
+                setPlaylistCoverUrl(resolveImageUrl(playlistData.coverUrl) || null);
+              }
+              
+              const tracks = playlistData.tracks || [];
+              if (tracks.length > 0) {
+                const formattedTracks = tracks.map((pt: any) => {
+                  const track = pt.track || pt;
+                  // Обрабатываем разные форматы данных из API
+                  const artistName = track.artist?.name || (typeof track.artist === 'string' ? track.artist : 'Unknown Artist');
+                  const albumTitle = track.album?.title || (typeof track.album === 'string' ? track.album : 'Unknown Album');
+                  return {
+                    id: track.id,
+                    title: track.title,
+                    artist: artistName,
+                    image: resolveImageUrl(track.coverUrl || track.coverPath) || selectedPlaylist.image || '',
+                    genre: track.genre?.name || 'Unknown',
+                    duration: track.duration || 0,
+                    audioUrl: resolveAudioUrl(track.audioUrl || track.audioPath),
+                    lyricsUrl: track.lyricsPath,
+                    playsCount: track.playsCount || 0,
+                    album: albumTitle,
+                  };
+                });
+                setPlaylistTracks(formattedTracks);
+                // Сохраняем треки в контекст для nextTrack
+                setCurrentPlaylistTracks(formattedTracks.map((track: any) => ({
+                  id: track.id,
+                  title: track.title,
+                  artist: track.artist,
+                  image: track.image,
+                  genre: track.genre || 'Unknown',
+                  duration: track.duration || 0,
+                  audioUrl: track.audioUrl,
+                  playlistTitle: selectedPlaylist.title,
+                })));
+                return;
+              }
+            }
+          }
+        } catch (error) {
+          // Игнорируем ошибки
+        }
+        
+        // Если ничего не найдено, возвращаем пустой массив
+        setPlaylistTracks([]);
+        setCurrentPlaylistTracks([]);
       } catch (error) {
-        console.error('Error loading playlist tracks:', error);
-        // Fallback to mock data
-        const mockTracks = playlistSongs[selectedPlaylist.title] || defaultSongs;
-        setPlaylistTracks(mockTracks);
-      } finally {
-        setIsLoading(false);
+        setPlaylistTracks([]);
       }
     };
 
+    // Сбрасываем обложку при смене плейлиста
+    setPlaylistCoverUrl(null);
     loadPlaylistTracks();
-  }, [selectedPlaylist]);
+  }, [selectedPlaylist, likedTracksList]);
 
   if (!selectedPlaylist) return null;
 
   const songs = playlistTracks;
 
   const handlePlaySong = (song: typeof songs[0]) => {
-    const isCurrentSong = currentTrack?.title === song.title;
+    // Всегда начинаем трек заново
+    const isCurrentSong = currentTrack?.title === song.title && currentTrack?.artist === song.artist;
     
-    if (isCurrentSong) {
+    if (isCurrentSong && isPlaying) {
+      // Если трек уже играет, перезапускаем с начала
+      seek(0);
+      setTimeout(() => {
+        if (!isPlaying) {
       togglePlay();
+        }
+      }, 50);
     } else {
+      // Устанавливаем новый трек или переключаемся на него
       setCurrentTrack({
+        id: song.id,
         title: song.title,
         artist: song.artist,
         image: song.image,
-        genre: 'Music',
+        genre: song.genre || 'Music',
+        duration: typeof song.duration === 'number' ? song.duration : (typeof song.duration === 'string' ? parseInt(song.duration) : 0),
+        audioUrl: song.audioUrl ? resolveAudioUrl(song.audioUrl) : undefined,
+        lyricsUrl: song.lyricsUrl,
         playlistTitle: selectedPlaylist.title,
       }, selectedPlaylist.title);
     }
   };
 
+  const handleSongClick = (song: typeof songs[0]) => {
+    // Одинарный клик - только выделяем трек
+    const isCurrentSong = currentTrack?.title === song.title && currentTrack?.artist === song.artist;
+    if (!isCurrentSong) {
+      setCurrentTrack({
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        image: song.image,
+        genre: song.genre || 'Music',
+        duration: typeof song.duration === 'number' ? song.duration : (typeof song.duration === 'string' ? parseInt(song.duration) : 0),
+        audioUrl: song.audioUrl ? resolveAudioUrl(song.audioUrl) : undefined,
+        lyricsUrl: song.lyricsUrl,
+        playlistTitle: selectedPlaylist.title,
+      }, selectedPlaylist.title);
+    }
+  };
+
+  const handleSongDoubleClick = (song: typeof songs[0]) => {
+    // Двойной клик - запускаем трек
+    handlePlaySong(song);
+  };
+
   const handlePlayAll = () => {
     if (songs.length > 0) {
+      const firstSong = songs[0];
       setCurrentTrack({
-        title: songs[0].title,
-        artist: songs[0].artist,
-        image: songs[0].image,
-        genre: 'Music',
+        id: firstSong.id,
+        title: firstSong.title,
+        artist: firstSong.artist,
+        image: firstSong.image,
+        genre: firstSong.genre || 'Music',
+        duration: typeof firstSong.duration === 'number' ? firstSong.duration : (typeof firstSong.duration === 'string' ? parseInt(firstSong.duration) : 0),
+        audioUrl: firstSong.audioUrl,
+        lyricsUrl: firstSong.lyricsUrl,
         playlistTitle: selectedPlaylist.title,
       }, selectedPlaylist.title);
     }
@@ -228,7 +355,7 @@ export function PlaylistView() {
                     </div>
                   ) : (
                     <img 
-                      src={selectedPlaylist.image} 
+                      src={playlistCoverUrl || resolveImageUrl(selectedPlaylist.image) || 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400'} 
                       alt={selectedPlaylist.title} 
                       className="w-full h-full object-cover"
                     />
@@ -246,37 +373,79 @@ export function PlaylistView() {
                 className="min-w-0"
               >
                 <p className="text-[10px] sm:text-xs text-white opacity-60 mb-1 sm:mb-2 uppercase tracking-wider">
-                  {t('playlist')}
+                  {selectedPlaylist.type === 'album' || selectedPlaylist.albumType === 'album' 
+                    ? t('albumType').toUpperCase()
+                    : selectedPlaylist.type === 'single' || selectedPlaylist.albumType === 'single'
+                    ? t('singleType').toUpperCase()
+                    : t('playlist').toUpperCase()}
                 </p>
                 <h1 className="playlist-title-spotify text-2xl sm:text-3xl md:text-4xl lg:text-5xl text-white mb-1 sm:mb-2 break-words overflow-wrap-anywhere">
                   {selectedPlaylist.title}
                 </h1>
+                {(selectedPlaylist.type === 'album' || selectedPlaylist.albumType === 'album' || selectedPlaylist.type === 'single' || selectedPlaylist.albumType === 'single') ? (
+                  <div className="text-white opacity-70 text-xs sm:text-sm break-words">
+                    {selectedPlaylist.artist.split('•').map((part, index, array) => {
+                      const trimmed = part.trim();
+                      const isArtist = index === array.length - 1;
+                      if (isArtist && trimmed) {
+                        return (
+                          <button
+                            key={index}
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (trimmed) {
+                                openArtistView(trimmed);
+                                closePlaylist();
+                              }
+                            }}
+                            className="hover:opacity-100 hover:underline"
+                          >
+                            {index > 0 ? ' • ' : ''}{trimmed}
+                          </button>
+                        );
+                      }
+                      return <span key={index}>{index > 0 ? ' • ' : ''}{trimmed}</span>;
+                    })}
+                  </div>
+                ) : (
                 <p className="text-white opacity-70 text-xs sm:text-sm break-words">
                   {selectedPlaylist.artist}
                 </p>
+                )}
                 <p className="text-white text-[10px] sm:text-xs opacity-50 mt-1 sm:mt-2">
                   {songs.length} {t('songs')}
                 </p>
               </motion.div>
 
-              {/* Play button */}
+              {/* Play and Shuffle buttons */}
               <motion.div
-                className="pt-2 sm:pt-3"
+                className="pt-2 sm:pt-3 flex items-center gap-3"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
               >
                 <button
                   onClick={handlePlayAll}
-                  className="px-5 sm:px-6 md:px-7 py-2.5 sm:py-3 rounded-full flex items-center gap-2 sm:gap-2.5 transition-all duration-300 hover:scale-105 shadow-xl text-sm sm:text-base mx-auto sm:mx-0"
+                  className="px-5 sm:px-6 md:px-7 py-2.5 sm:py-3 rounded-full flex items-center gap-2 sm:gap-2.5 transition-all duration-300 hover:scale-105 shadow-xl text-sm sm:text-base"
                   style={{
                     background: '#1ED760',
                     color: '#000',
                     boxShadow: '0 6px 24px rgba(0, 0, 0, 0.3)',
                   }}
                 >
-                  <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+                  <Play className="w-4 h-4 sm:w-5 sm:h-5" style={{ fill: '#000', color: '#000' }} />
                   <span className="font-semibold">{t('play')}</span>
+                </button>
+                <button
+                  onClick={toggleShuffle}
+                  className={`px-4 py-2.5 sm:py-3 rounded-full border flex items-center gap-2 text-sm transition-all duration-300 hover:scale-105 ${
+                    shuffle 
+                      ? 'border-[#1ED760] bg-[#1ED760]/10 text-[#1ED760]' 
+                      : 'border-white/20 text-white hover:bg-white/10'
+                  }`}
+                >
+                  <Shuffle className="w-4 h-4" />
+                  <span className="font-semibold">{t('shuffle')}</span>
                 </button>
               </motion.div>
             </div>
@@ -286,10 +455,18 @@ export function PlaylistView() {
         {/* Songs list */}
         <div className="glass-strong rounded-xl sm:rounded-2xl overflow-hidden">
           {/* Table header - Hidden on mobile */}
-          <div className="hidden sm:grid grid-cols-[50px_1fr_160px_80px] md:grid-cols-[50px_minmax(200px,1fr)_180px_80px] gap-3 sm:gap-4 px-4 sm:px-5 md:px-6 py-2.5 sm:py-3 border-b border-white/10 text-[10px] sm:text-xs text-white opacity-50 uppercase tracking-wider">
+          <div className={`hidden sm:grid gap-3 sm:gap-4 px-4 sm:px-5 md:px-6 py-2.5 sm:py-3 border-b border-white/10 text-[10px] sm:text-xs text-white opacity-50 uppercase tracking-wider ${
+            selectedPlaylist.type === 'album' || selectedPlaylist.albumType === 'album' || selectedPlaylist.type === 'single' || selectedPlaylist.albumType === 'single'
+              ? 'grid-cols-[1fr_80px]'
+              : 'grid-cols-[50px_1fr_160px_80px] md:grid-cols-[50px_minmax(200px,1fr)_180px_80px]'
+          }`}>
+            {(selectedPlaylist.type !== 'album' && selectedPlaylist.albumType !== 'album' && selectedPlaylist.type !== 'single' && selectedPlaylist.albumType !== 'single') && (
             <div className="text-center">#</div>
+            )}
             <div className="truncate">{t('title')}</div>
+            {(selectedPlaylist.type !== 'album' && selectedPlaylist.albumType !== 'album' && selectedPlaylist.type !== 'single' && selectedPlaylist.albumType !== 'single') && (
             <div className="hidden md:block truncate">{t('album')}</div>
+            )}
             <div className="flex items-center justify-end gap-2">
               <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             </div>
@@ -298,7 +475,7 @@ export function PlaylistView() {
           {/* Songs */}
           <div>
             {songs.map((song, index) => {
-              const isCurrentSong = currentTrack?.title === song.title;
+              const isCurrentSong = currentTrack?.title === song.title && currentTrack?.artist === song.artist;
               const isSongPlaying = isCurrentSong && isPlaying;
 
               return (
@@ -307,8 +484,13 @@ export function PlaylistView() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.03 }}
-                  onClick={() => handlePlaySong(song)}
-                  className="grid grid-cols-[40px_1fr_60px] sm:grid-cols-[50px_1fr_80px] md:grid-cols-[50px_minmax(200px,1fr)_180px_80px] gap-2 sm:gap-3 md:gap-4 px-3 sm:px-4 md:px-6 py-2 sm:py-2.5 hover:bg-white/5 transition-all duration-200 cursor-pointer group border-b border-white/5 last:border-0"
+                  onClick={() => handleSongClick(song)}
+                  onDoubleClick={() => handleSongDoubleClick(song)}
+                  className={`grid gap-2 sm:gap-3 md:gap-4 px-3 sm:px-4 md:px-6 py-2 sm:py-2.5 hover:bg-white/5 transition-all duration-200 cursor-pointer group border-b border-white/5 last:border-0 ${
+                    selectedPlaylist.type === 'album' || selectedPlaylist.albumType === 'album' || selectedPlaylist.type === 'single' || selectedPlaylist.albumType === 'single'
+                      ? 'grid-cols-[40px_1fr_60px] sm:grid-cols-[50px_1fr_80px]'
+                      : 'grid-cols-[40px_1fr_60px] sm:grid-cols-[50px_1fr_80px] md:grid-cols-[50px_minmax(200px,1fr)_180px_80px]'
+                  }`}
                   style={isCurrentSong ? {
                     backgroundColor: 'rgba(30, 215, 96, 0.1)',
                   } : {}}
@@ -332,12 +514,17 @@ export function PlaylistView() {
 
                   {/* Title & Artist */}
                   <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    {/* Показываем картинку только если это не альбом/сингл */}
+                    {!(selectedPlaylist.type === 'album' || selectedPlaylist.albumType === 'album' || selectedPlaylist.type === 'single' || selectedPlaylist.albumType === 'single') && (
                     <div className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 flex-shrink-0 rounded-md sm:rounded-lg overflow-hidden glass p-0.5">
                       <img src={song.image} alt={song.title} className="w-full h-full object-cover rounded-sm sm:rounded-md" />
                     </div>
+                    )}
+                    <div className="min-w-0 flex-1 flex items-center gap-2">
                     <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
                       <p 
-                        className="text-sm sm:text-base truncate mb-0 sm:mb-0.5 transition-colors duration-300"
+                            className="text-sm sm:text-base truncate mb-0 sm:mb-0.5 transition-colors duration-300 flex-1"
                         style={{ 
                           color: isCurrentSong ? '#1ED760' : 'white',
                           fontWeight: isCurrentSong ? '600' : '500',
@@ -345,30 +532,122 @@ export function PlaylistView() {
                       >
                         {song.title}
                       </p>
+                        </div>
+                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                              e.preventDefault();
                           openArtistView(song.artist);
                           closePlaylist();
                         }}
-                        className="text-xs sm:text-sm text-white opacity-50 hover:opacity-100 hover:underline truncate text-left w-full"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="text-xs sm:text-sm text-white opacity-50 hover:opacity-100 hover:underline truncate text-left"
                       >
                         {song.artist}
                       </button>
+                          {song.playsCount !== undefined && song.playsCount > 0 && (
+                            <>
+                              <span className="text-xs sm:text-sm text-white opacity-30">•</span>
+                              <span className="text-xs sm:text-sm text-white opacity-50">
+                                {song.playsCount.toLocaleString('ru-RU')}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <TrackMenu
+                        track={{
+                          id: song.id,
+                          title: song.title,
+                          artist: song.artist,
+                          image: song.image,
+                          album: song.album,
+                          albumId: song.albumId,
+                          audioUrl: song.audioUrl,
+                          duration: typeof song.duration === 'number' ? song.duration : (typeof song.duration === 'string' ? parseInt(song.duration) : 0),
+                          genre: song.genre || 'Unknown',
+                          playlistTitle: selectedPlaylist.title,
+                        }}
+                      />
                     </div>
                   </div>
 
-                  {/* Album - Hidden on mobile */}
-                  <div className="hidden md:flex items-center min-w-0">
+                  {/* Album - Hidden on mobile and when viewing album/single */}
+                  {(selectedPlaylist.type !== 'album' && selectedPlaylist.albumType !== 'album' && selectedPlaylist.type !== 'single' && selectedPlaylist.albumType !== 'single') && (
+                  <div 
+                    className="hidden md:flex items-center min-w-0 relative z-10" 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                    onContextMenu={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                  >
+                    {song.albumId ? (
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          try {
+                            // Загружаем данные альбома для получения правильного типа
+                            const albums = await apiClient.getAlbums({ limit: 1000 });
+                            const album = albums.find((a: any) => a.id === song.albumId);
+                            if (album) {
+                              const albumType = album.type === 'album' ? 'album' : 'single';
+                              openPlaylist({
+                                title: album.title,
+                                artist: `${album.year || ''} • ${album.artist?.name || song.artist}`,
+                                image: album.coverUrl || album.coverPath || '',
+                                type: albumType,
+                                albumId: album.id,
+                                albumType: albumType,
+                              });
+                              closePlaylist();
+                            }
+                          } catch (error) {
+                            console.error('Error loading album:', error);
+                          }
+                        }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        onContextMenu={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        className="text-sm text-white opacity-50 hover:opacity-100 hover:underline truncate text-left cursor-pointer"
+                      >
+                        {song.album}
+                      </button>
+                    ) : (
                     <p className="text-sm text-white opacity-50 truncate">
                       {song.album}
                     </p>
+                    )}
                   </div>
+                  )}
 
                   {/* Duration */}
                   <div className="flex items-center justify-end">
                     <span className="text-xs sm:text-sm text-white opacity-50 tabular-nums">
-                      {song.duration}
+                      {formatDuration(song.duration || 0)}
                     </span>
                   </div>
                 </motion.div>

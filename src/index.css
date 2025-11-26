@@ -3466,6 +3466,11 @@ body::-webkit-scrollbar, html::-webkit-scrollbar, main::-webkit-scrollbar, .main
   scrollbar-color: rgba(30, 215, 96, 0.5) rgba(255, 255, 255, 0.1) !important;
   flex: 1 !important;
   min-height: 0 !important;
+  height: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  scroll-snap-type: none !important;
 }
 
 
@@ -3534,23 +3539,27 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   display: flex;
   position: fixed;
   inset: 0;
-  overflow: hidden auto;
+  overflow: hidden;
+  /* Блокируем прокрутку страницы */
+  touch-action: none;
 }
 
 .lyrics-wrap:before {
   content: "";
   background-image: var(--lyrics-bg-url);
   filter: blur(52px) saturate(188%) brightness(.96) hue-rotate(var(--hue, 0deg));
-  transform: translate3d(var(--lyrics-bg-ox), var(--lyrics-bg-oy), 0) scale(var(--lyrics-bg-zoom));
+  transform: translate3d(0, 0, 0) scale(1.14);
   opacity: .92;
-  will-change: transform, filter, opacity;
+  will-change: transform;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
   z-index: 0;
   background-position: center;
   background-size: cover;
-  transition: transform .6s, filter .6s, opacity .6s;
   animation: 46s ease-in-out infinite alternate lyrics-huePulse;
   position: absolute;
   inset: -14%;
+  contain: layout style paint;
 }
 
 @keyframes lyrics-huePulse {
@@ -3996,7 +4005,7 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
 }
 
 .lyrics-viewport {
-  touch-action: none;
+  touch-action: pan-y;
   --mid: .4;
   --guard: .16;
   --fadeH: 14px;
@@ -4004,22 +4013,28 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   --cut: calc((var(--mid)  - var(--guard)) * 100%);
   width: min(980px, 100%);
   height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
   -webkit-mask-image: linear-gradient(180deg, #0000 0%, #0000 calc(var(--cut)  - var(--fadeH)), #fff var(--cut), #fff 100%);
   mask-image: linear-gradient(180deg, #0000 0%, #0000 calc(var(--cut)  - var(--fadeH)), #fff var(--cut), #fff 100%);
   position: relative;
-  overflow: hidden;
 }
 
 .lyrics-rail {
   will-change: transform;
   backface-visibility: hidden;
-  contain: paint layout;
+  transform-style: preserve-3d;
+  contain: paint layout style;
+  transform: translate3d(0, 0, 0);
   flex-direction: column;
   gap: 1.12em;
   display: flex;
   position: absolute;
   inset: 0;
-  transform: translate3d(0, 0, 0);
+  isolation: isolate;
+  /* Transition будет устанавливаться динамически в JS */
 }
 
 .lyrics-pad.lyrics-top {
@@ -4039,10 +4054,19 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   color: var(--lyrics-muted-2);
   cursor: pointer;
   backface-visibility: hidden;
+  transform-style: preserve-3d;
+  will-change: transform, opacity;
+  contain: layout style paint;
   letter-spacing: -.02em;
   font-size: 46px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-weight: 700;
   line-height: 1.3;
+  isolation: isolate;
+  /* GPU ускорение для плавной анимации */
+  transform: translateZ(0);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 @media (width <= 1400px) {
@@ -4077,27 +4101,16 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
 
 .lyrics-row.leaving {
   opacity: 0;
-  transition: opacity .22s;
+  transition: opacity .2s cubic-bezier(.4, 0, .2, 1);
 }
 
-.lyrics-row.lyrics-cur .ch {
+.lyrics-row.lyrics-cur {
   color: var(--lyrics-muted-2);
+  transition: color 0.2s cubic-bezier(.4, 0, .2, 1);
 }
 
-@supports (color: color-mix(in lab, red, red)) {
-  .lyrics-row.lyrics-cur .ch {
-    color: color-mix(in srgb, var(--lyrics-muted-2) 80%, transparent);
-  }
-}
-
-.lyrics-row.lyrics-cur .ch.active {
+.lyrics-row.lyrics-cur.active {
   color: #fff;
-}
-
-.ch.partial {
-  background: linear-gradient(to right, currentColor 0 calc(var(--p) * 1%), var(--lyrics-muted-2) calc(var(--p) * 1%) 100%);
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 .bump {

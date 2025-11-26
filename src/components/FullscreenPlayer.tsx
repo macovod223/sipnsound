@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { usePlayer } from './PlayerContext';
+import { usePlayer, type LyricLine } from './PlayerContext';
 import { X, Heart, SkipBack, SkipForward } from 'lucide-react';
 
 type Seg = { t: number; text: string };
@@ -9,6 +9,27 @@ type Row = { start: number; end: number; text: string; segments: Seg[] };
 const fmt = (sec: number) => {
   const s = Math.floor(sec), m = Math.floor(s / 60), r = s % 60;
   return `${m}:${r.toString().padStart(2, '0')}`;
+};
+
+const lyricLinesToRows = (lines: LyricLine[]): Row[] => {
+  if (!lines || !lines.length) {
+    return [];
+  }
+
+  const sorted = [...lines]
+    .filter((line) => typeof line?.text === 'string' && line.text.trim().length > 0)
+    .map((line) => ({
+      time: typeof line.time === 'number' ? line.time : Number(line.time) || 0,
+      text: line.text.trim(),
+    }))
+    .sort((a, b) => a.time - b.time);
+
+  return sorted.map((line, index) => ({
+    start: line.time,
+    end: index < sorted.length - 1 ? sorted[index + 1].time : line.time + 5,
+    text: line.text,
+    segments: [],
+  }));
 };
 
 /* LRC с inline-токенами <mm:ss.xx> */
@@ -100,13 +121,7 @@ export function FullscreenPlayer() {
   /* флаг анимации, чтобы не наслаивать */
   const animating = useRef(false);
 
-  // ===== посимвольная подсветка =====
-  const charEls = useRef<HTMLSpanElement[]>([]);
-  const segMap = useRef<{ startChar: number; len: number; tStart: number; tEnd: number }[]>([]);
-  const totalChars = useRef(0);
-  const prevK = useRef(-1);
-  const lastPartial = useRef<HTMLSpanElement | null>(null);
-
+  // ===== подсветка всей строки (без посимвольной) =====
   const renderText = (el: HTMLElement, text: string) => { el.textContent = text; };
 
   function setCurrentHeightVar() {
@@ -119,71 +134,22 @@ export function FullscreenPlayer() {
     const el = curRef.current;
     if (!el || !row) return;
     
-    el.innerHTML = '';
-    charEls.current = [];
-    for (const ch of row.text) {
-      const s = document.createElement('span');
-      s.className = 'ch';
-      s.textContent = ch;
-      el.appendChild(s);
-      charEls.current.push(s);
-    }
-    totalChars.current = charEls.current.length;
-    prevK.current = -1;
-    if (lastPartial.current) {
-      lastPartial.current.classList.remove('partial');
-      lastPartial.current = null;
-    }
-
-    segMap.current = [];
-    if (row.segments?.length) {
-      let pos = 0;
-      for (let j = 0; j < row.segments.length; j++) {
-        const sg = row.segments[j];
-        const nextT = j < row.segments.length - 1 ? row.segments[j + 1].t : row.end;
-        let at = row.text.indexOf(sg.text, pos);
-        if (at < 0) at = pos;
-        segMap.current.push({ startChar: at, len: sg.text.length, tStart: sg.t, tEnd: nextT });
-        pos = at + sg.text.length;
-      }
-    } else segMap.current.push({ startChar: 0, len: totalChars.current, tStart: row.start, tEnd: row.end });
-
+    // Просто вставляем текст без создания span'ов для каждого символа
+    el.textContent = row.text;
     requestAnimationFrame(setCurrentHeightVar);
   }
 
-  function setActiveChars(x: number) {
-    if (!totalChars.current || !charEls.current.length) return; // Проверка на наличие элементов
-    let k = Math.floor(x), f = x - k;
-    if (k < 0) { k = 0; f = 0; }
-    if (k >= totalChars.current) { k = totalChars.current - 1; f = 1; }
-    if (prevK.current < k) {
-      for (let i = prevK.current + 1; i <= k; i++) charEls.current[i]?.classList.add('active');
-    } else if (prevK.current > k) {
-      for (let i = k + 1; i <= prevK.current; i++) charEls.current[i]?.classList.remove('active');
-    }
-    prevK.current = k;
-    if (lastPartial.current && lastPartial.current !== charEls.current[k]) lastPartial.current.classList.remove('partial');
-    const edge = charEls.current[k];
-    if (!edge) return; // Проверка на существование конкретного элемента
-    edge.classList.add('partial');
-    edge.style.setProperty('--p', (f * 100).toFixed(3));
-    lastPartial.current = edge;
-  }
-
-  function progressChars(time: number) {
+  // Подсветка всей строки целиком
+  function updateActiveRow(time: number) {
     const r = rowsR.current[idxR.current];
-    if (!r || !charEls.current.length) return;
-    if (time <= r.start) { setActiveChars(0); return; }
-    if (time >= r.end) { setActiveChars(totalChars.current); return; }
-    let done = 0;
-    for (const s of segMap.current) {
-      if (time >= s.tEnd) { done += s.len; continue; }
-      if (time <= s.tStart) break;
-      const frac = Math.max(0, Math.min(1, (time - s.tStart) / Math.max(0.001, s.tEnd - s.tStart)));
-      done += s.len * frac;
-      break;
+    if (!r || !curRef.current) return;
+    
+    // Если время в пределах строки - подсвечиваем всю строку
+    if (time >= r.start && time < r.end) {
+      curRef.current.classList.add('active');
+    } else {
+      curRef.current.classList.remove('active');
     }
-    setActiveChars(done);
   }
 
   function fillTrio(i: number) {
@@ -196,12 +162,13 @@ export function FullscreenPlayer() {
     renderText(n2Ref.current, r[i + 2]?.text ?? '');
     renderText(n3Ref.current, r[i + 3]?.text ?? '');
 
+    curRef.current.dataset.idx = String(i);
     n1Ref.current.dataset.idx = String(i + 1);
     n2Ref.current.dataset.idx = String(i + 2);
     n3Ref.current.dataset.idx = String(i + 3);
   }
 
-  // ===== плавный слайд вверх; без дёрга =====
+  // ===== плавный слайд вверх; оптимизированная анимация без дерганий =====
   function slideToNext(newIndex: number) {
     if (animating.current) return;
     if (!railRef.current || !curRef.current) return;
@@ -209,43 +176,59 @@ export function FullscreenPlayer() {
     animating.current = true;
 
     const rail = railRef.current;
+    // Отменяем все анимации
     rail.getAnimations().forEach(a => a.cancel());
 
-    // старая строка — мягкое исчезновение
+    // Старая строка — мягкое исчезновение
     curRef.current.classList.add('leaving');
 
+    // Используем двойной requestAnimationFrame для получения высоты без reflow и layout shift
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
     const gap = parseFloat(getComputedStyle(rail).gap || '0');
-    const curH = Math.round((curRef.current.getBoundingClientRect().height) + gap);
+        const curH = Math.round((curRef.current?.getBoundingClientRect().height || 0) + gap);
 
-    const anim = rail.animate(
-      [{ transform: 'translate3d(0,0,0)' }, { transform: `translate3d(0,-${curH}px,0)` }],
-      { duration: 340, easing: 'cubic-bezier(.22,.8,.24,1)', fill: 'forwards', composite: 'replace' }
-    );
+        // Используем CSS transition для плавности с GPU ускорением
+        // Apple Music style - быстрая и плавная анимация
+        rail.style.transition = 'transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1)';
+        rail.style.transform = `translate3d(0,-${curH}px,0)`;
+        rail.style.willChange = 'transform';
 
-    anim.onfinish = () => {
-      // @ts-ignore
-      if (typeof (anim as any).commitStyles === 'function') (anim as any).commitStyles();
-      anim.cancel();
+      // После завершения анимации
+      const onTransitionEnd = () => {
+        rail.removeEventListener('transitionend', onTransitionEnd);
+        rail.style.transition = '';
+        rail.style.transform = 'translate3d(0,0,0)';
 
-      // синхронно обновим индекс (до подсветки)
+        // Синхронно обновим индекс
       idxR.current = newIndex;
       setIdx(newIndex);
 
-      // заполняем DOM новой тройкой
+        // Заполняем DOM новой тройкой
       fillTrio(newIndex);
       setCurrentHeightVar();
 
-      // мгновенно инициируем подсветку по текущему времени
+        // Мгновенно инициируем подсветку по текущему времени
       const nowTime = currentTime;
-      progressChars(nowTime + 0.001);
+        updateActiveRow(nowTime);
 
-      rail.style.transform = 'translate3d(0,0,0)';
       curRef.current?.classList.remove('leaving');
       curRef.current?.classList.add('bump');
-      window.setTimeout(() => curRef.current?.classList.remove('bump'), 420);
+        window.setTimeout(() => curRef.current?.classList.remove('bump'), 200);
 
       animating.current = false;
     };
+
+      rail.addEventListener('transitionend', onTransitionEnd, { once: true });
+      
+      // Fallback на случай если transitionend не сработает
+      setTimeout(() => {
+        if (animating.current) {
+          onTransitionEnd();
+        }
+      }, 450);
+      });
+    });
   }
 
   function jumpTo(index: number) {
@@ -267,9 +250,10 @@ export function FullscreenPlayer() {
     const n1 = n1Ref.current;
     const n2 = n2Ref.current;
     const n3 = n3Ref.current;
+    const cur = curRef.current;
     const viewport = viewportRef.current;
     
-    if (!n1 || !n2 || !n3 || !viewport) return;
+    if (!n1 || !n2 || !n3 || !cur || !viewport) return;
     
     const onRowClick = (e: MouseEvent) => {
       const el = e.currentTarget as HTMLElement;
@@ -308,6 +292,7 @@ export function FullscreenPlayer() {
     n1.addEventListener('click', onRowClick);
     n2.addEventListener('click', onRowClick);
     n3.addEventListener('click', onRowClick);
+    cur.addEventListener('click', onRowClick);
 
     viewport.addEventListener('wheel', onWheel as unknown as EventListener, { passive: false });
     viewport.addEventListener('touchstart', onTouchStart as unknown as EventListener, { passive: false });
@@ -318,6 +303,7 @@ export function FullscreenPlayer() {
       n1.removeEventListener('click', onRowClick);
       n2.removeEventListener('click', onRowClick);
       n3.removeEventListener('click', onRowClick);
+      cur.removeEventListener('click', onRowClick);
       viewport.removeEventListener('wheel', onWheel as unknown as EventListener);
       viewport.removeEventListener('touchstart', onTouchStart as unknown as EventListener);
       viewport.removeEventListener('touchmove', onTouchMove as unknown as EventListener);
@@ -343,11 +329,19 @@ export function FullscreenPlayer() {
     };
   }, [isFullscreen]);
 
-  // ===== Обновление текущей строки и подсветки =====
+  // ===== Обновление текущей строки и подсветки (120Hz оптимизация) =====
+  const rafIdRef = useRef<number | null>(null);
+  const lastProgressRef = useRef<number>(-1);
+  
   useEffect(() => {
+    if (!isFullscreen || !timesR.current.length) return;
+    
+    // Используем RAF напрямую для 120Hz поддержки
+    const update = (timestamp: number) => {
+      const ts = timesR.current;
     const now = Date.now();
-    const ts = timesR.current;
-    if (ts.length && isFullscreen) {
+      
+      // Проверка смены строки (реже)
       if (now >= browsingUntil.current && !animating.current) {
         let i = ub(ts, currentTime + 0.01) - 1;
         if (i < 0) i = 0;
@@ -356,20 +350,29 @@ export function FullscreenPlayer() {
           slideToNext(i);
         }
       }
-      progressChars(currentTime);
-    }
+      
+      // Обновляем подсветку строки
+      const timeDiff = Math.abs(currentTime - lastProgressRef.current);
+      if (timeDiff > 0.05 || lastProgressRef.current < 0) { // Обновляем реже - только при смене строки
+        updateActiveRow(currentTime);
+        lastProgressRef.current = currentTime;
+      }
+      
+      rafIdRef.current = requestAnimationFrame(update);
+    };
+    
+    rafIdRef.current = requestAnimationFrame(update);
+    
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      lastProgressRef.current = -1;
+    };
   }, [currentTime, isFullscreen]);
 
-  // ===== фон параллакс =====
-  useEffect(() => {
-    if (!isFullscreen) return;
-    const dur = Math.max(1, duration), ph = (currentTime / dur) * 2 * Math.PI;
-    const ox = Math.sin(ph) * 1.4, oy = Math.cos(ph * 0.7) * 1.1, zoom = 1.18 + Math.sin(ph * 0.45) * 0.028;
-    const root = document.documentElement.style;
-    root.setProperty('--lyrics-bg-ox', `${ox}vw`);
-    root.setProperty('--lyrics-bg-oy', `${oy}vh`);
-    root.setProperty('--lyrics-bg-zoom', zoom.toFixed(3));
-  }, [currentTime, duration, isFullscreen]);
+  // Фон статичен - убраны анимации переливов
 
   // ===== init лирики =====
   useEffect(() => {
@@ -411,6 +414,10 @@ export function FullscreenPlayer() {
 
     // Загрузка текстов песен из трека или генерация заглушки
     const loadLyrics = async () => {
+      if (Array.isArray(currentTrack.lyrics) && currentTrack.lyrics.length) {
+        return lyricLinesToRows(currentTrack.lyrics);
+      }
+
       if (currentTrack.lyrics && typeof currentTrack.lyrics === 'string') {
         // Если текст песни - строка LRC
         return parseLRC(currentTrack.lyrics);
@@ -466,6 +473,27 @@ export function FullscreenPlayer() {
   const onSeek = (v: number) => {
     seek(v);
   };
+
+  // Блокируем прокрутку страницы при открытии полноэкранного плеера
+  useEffect(() => {
+    if (isFullscreen) {
+      // Сохраняем текущую позицию прокрутки
+      const scrollY = window.scrollY;
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = '100%';
+      document.body.style.overflow = 'hidden';
+      
+      return () => {
+        // Восстанавливаем прокрутку при закрытии
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.width = '';
+        document.body.style.overflow = '';
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [isFullscreen]);
 
   if (!currentTrack) return null;
 

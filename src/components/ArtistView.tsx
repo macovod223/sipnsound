@@ -1,139 +1,226 @@
 import { motion } from "motion/react";
-import { Play, Shuffle, Check, MoreHorizontal, ChevronLeft, Clock } from "lucide-react";
-import { usePlayer } from "./PlayerContext";
+import { Play, Shuffle, Check, ChevronLeft, Search, Loader2 } from "lucide-react";
+import { usePlayer, type Track } from "./PlayerContext";
 import { useSettings } from "./SettingsContext";
 import { ImageWithFallback } from "@/components/timurgenii/ImageWithFallback";
-import { useState, useEffect } from "react";
-
-interface Track {
-  id: number;
-  title: string;
-  album?: string;
-  plays: string;
-  duration: string;
-  image?: string;
-}
-
-interface Album {
-  title: string;
-  year: number;
-  image: string;
-  type?: "album" | "single";
-}
-
-interface Artist {
-  name: string;
-  image: string;
-  coverImage: string;
-  verified: boolean;
-  monthlyListeners: string;
-  topTracks: Track[];
-  albums: Album[];
-}
-
-interface ArtistViewProps {
-  onBack: () => void;
-  artistName?: string;
-}
+import { useState, useEffect, useMemo } from "react";
+import { apiClient } from "../api/client";
+import { resolveAudioUrl, resolveImageUrl } from "@/utils/media";
+import { TrackMenu } from "./TrackMenu";
 
 type TabType = "tracks" | "albums" | "singles";
 
-const mockArtists: { [key: string]: Artist } = {
-  "Travis Scott": {
-    name: "Travis Scott",
-    image: "https://images.unsplash.com/photo-1546405524-5714e4492a01?w=400",
-    coverImage: "https://images.unsplash.com/flagged/photo-1557286249-08f5bc2ef21d?w=1200",
-    verified: true,
-    monthlyListeners: "61,297,892",
-    topTracks: [
-      { id: 1, title: "goosebumps", album: "UTOPIA", plays: "2,969,966,425", duration: "4:03", image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400" },
-      { id: 2, title: "FEIN (feat. Playboi Carti)", album: "UTOPIA", plays: "1,437,289,547", duration: "3:11", image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400" },
-      { id: 3, title: "HIGHEST IN THE ROOM", album: "JACKBOYS 2", plays: "2,131,704,845", duration: "2:55", image: "https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400" },
-      { id: 4, title: "SICKO MODE", album: "ASTROWORLD", plays: "1,892,445,321", duration: "5:13", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400" },
-      { id: 5, title: "Butterfly Effect", album: "ASTROWORLD", plays: "1,234,567,890", duration: "3:10", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400" },
-      { id: 6, title: "STARGAZING", album: "ASTROWORLD", plays: "987,654,321", duration: "4:30", image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400" },
-      { id: 7, title: "Antidote", album: "Rodeo", plays: "876,543,210", duration: "4:21", image: "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400" },
-      { id: 8, title: "90210", album: "Rodeo", plays: "765,432,109", duration: "5:38", image: "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400" },
-      { id: 9, title: "YOSEMITE", album: "ASTROWORLD", plays: "654,321,098", duration: "2:30", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400" },
-      { id: 10, title: "NO BYSTANDERS", album: "ASTROWORLD", plays: "543,210,987", duration: "3:38", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400" },
-    ],
-    albums: [
-      { title: "UTOPIA", year: 2023, image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400", type: "album" },
-      { title: "ASTROWORLD", year: 2018, image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400", type: "album" },
-      { title: "Birds In The Trap Sing McKnight", year: 2016, image: "https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400", type: "album" },
-      { title: "Rodeo", year: 2015, image: "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400", type: "album" },
-      { title: "JACKBOYS 2", year: 2025, image: "https://images.unsplash.com/photo-1619983081563-430f63602796?w=400", type: "album" },
-      { title: "Pipe Down (feat. Travis Scott)", year: 2021, image: "https://images.unsplash.com/photo-1590736969955-71cc94901144?w=400", type: "single" },
-      { title: "HIGHEST IN THE ROOM", year: 2019, image: "https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400", type: "single" },
-    ],
-  },
-  "Gaviin": {
-    name: "Gaviin",
-    image: "https://images.unsplash.com/photo-1675099348165-1c9056e5e492?w=400",
-    coverImage: "https://images.unsplash.com/photo-1633119216068-12d17b878451?w=1200",
-    verified: true,
-    monthlyListeners: "42,156,783",
-    topTracks: [
-      { id: 1, title: "Back Cooking", album: "Latest", plays: "856,234,120", duration: "3:45", image: "https://images.unsplash.com/photo-1601643157091-ce5c665179ab?w=400" },
-      { id: 2, title: "Only Time", album: "Singles", plays: "734,892,456", duration: "3:22", image: "https://images.unsplash.com/photo-1629426958038-a4cb6e3830a0?w=400" },
-      { id: 3, title: "I Need You", album: "Latest", plays: "623,445,789", duration: "4:01", image: "https://images.unsplash.com/photo-1624703307604-744ec383cbf4?w=400" },
-      { id: 4, title: "LICKS", album: "Latest", plays: "512,334,667", duration: "2:58", image: "https://images.unsplash.com/photo-1692271931628-adc2b16670dd?w=400" },
-      { id: 5, title: "Voices / Psycho", album: "Singles", plays: "445,223,891", duration: "3:34", image: "https://images.unsplash.com/photo-1651597035515-36e4b2722fcb?w=400" },
-      { id: 6, title: "Night Drive", album: "Latest", plays: "398,765,432", duration: "3:52", image: "https://images.unsplash.com/photo-1601643157091-ce5c665179ab?w=400" },
-      { id: 7, title: "Sunrise", album: "Singles", plays: "345,678,901", duration: "4:15", image: "https://images.unsplash.com/photo-1629426958038-a4cb6e3830a0?w=400" },
-      { id: 8, title: "Lost in Time", album: "Latest", plays: "298,765,432", duration: "3:28", image: "https://images.unsplash.com/photo-1624703307604-744ec383cbf4?w=400" },
-      { id: 9, title: "Midnight City", album: "Singles", plays: "267,543,210", duration: "3:47", image: "https://images.unsplash.com/photo-1692271931628-adc2b16670dd?w=400" },
-      { id: 10, title: "Dreams", album: "Latest", plays: "234,567,890", duration: "4:05", image: "https://images.unsplash.com/photo-1651597035515-36e4b2722fcb?w=400" },
-    ],
-    albums: [
-      { title: "Latest Album", year: 2025, image: "https://images.unsplash.com/photo-1601643157091-ce5c665179ab?w=400", type: "album" },
-      { title: "Singles Collection", year: 2024, image: "https://images.unsplash.com/photo-1629426958038-a4cb6e3830a0?w=400", type: "single" },
-    ],
-  },
-  "The Weeknd": {
-    name: "The Weeknd",
-    image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400",
-    coverImage: "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=1200",
-    verified: true,
-    monthlyListeners: "95,432,109",
-    topTracks: [
-      { id: 1, title: "Blinding Lights", album: "After Hours", plays: "3,876,234,567", duration: "3:20", image: "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400" },
-      { id: 2, title: "Starboy", album: "Starboy", plays: "2,945,123,456", duration: "3:50", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400" },
-      { id: 3, title: "Save Your Tears", album: "After Hours", plays: "2,345,678,901", duration: "3:35", image: "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400" },
-      { id: 4, title: "Die For You", album: "Starboy", plays: "1,987,654,321", duration: "4:20", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400" },
-      { id: 5, title: "The Hills", album: "Beauty Behind The Madness", plays: "1,765,432,109", duration: "4:02", image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400" },
-      { id: 6, title: "Sacrifice", album: "Dawn FM", plays: "1,234,567,890", duration: "3:08", image: "https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400" },
-      { id: 7, title: "Can't Feel My Face", album: "Beauty Behind The Madness", plays: "1,123,456,789", duration: "3:35", image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400" },
-      { id: 8, title: "I Feel It Coming", album: "Starboy", plays: "987,654,321", duration: "4:29", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400" },
-      { id: 9, title: "Take My Breath", album: "Dawn FM", plays: "876,543,210", duration: "5:40", image: "https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400" },
-      { id: 10, title: "Out of Time", album: "Dawn FM", plays: "765,432,109", duration: "3:34", image: "https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400" },
-    ],
-    albums: [
-      { title: "After Hours", year: 2020, image: "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400", type: "album" },
-      { title: "Dawn FM", year: 2022, image: "https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400", type: "album" },
-      { title: "Starboy", year: 2016, image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400", type: "album" },
-      { title: "Beauty Behind The Madness", year: 2015, image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400", type: "album" },
-    ],
-  },
+const FALLBACK_ARTIST_IMAGE = "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600";
+
+interface ArtistViewProps {
+  onBack: () => void;
+  artist?: {
+    id?: string;
+    name: string;
+  };
+}
+
+interface ArtistDetails {
+  id: string;
+  name: string;
+  bio?: string | null;
+  image: string;
+  coverImage: string;
+  verified: boolean;
+  monthlyListeners?: number | null;
+  tracks: Array<{
+    id: string;
+    title: string;
+    duration?: number | null;
+    playsCount?: number | null;
+    image: string;
+    audioUrl?: string;
+    lyricsUrl?: string;
+  }>;
+  albums: Array<{
+    id: string;
+    title: string;
+    year?: number | null;
+    type?: string | null;
+    image: string;
+    tracksCount?: number;
+  }>;
+}
+
+const resolveImage = (url?: string | null, fallback: string = FALLBACK_ARTIST_IMAGE) => {
+  return resolveImageUrl(url, fallback) || fallback;
 };
 
-export function ArtistView({ onBack, artistName }: ArtistViewProps) {
-  const { currentTrack, setCurrentTrack, isPlaying, togglePlay, openPlaylist, artistReturnTab } = usePlayer();
+export function ArtistView({ onBack, artist }: ArtistViewProps) {
+  const { currentTrack, setCurrentTrack, isPlaying, togglePlay, openPlaylist, artistReturnTab, seek, shuffle, toggleShuffle, setCurrentPlaylistTracks } = usePlayer();
   const { animations, t } = useSettings();
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isLoadingFollow, setIsLoadingFollow] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>("tracks");
   const [showAllTracks, setShowAllTracks] = useState(false);
-  const [hoveredAlbum, setHoveredAlbum] = useState<string | null>(null);
+  const [trackSearch, setTrackSearch] = useState("");
+  const [artistData, setArtistData] = useState<ArtistDetails | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // When returning from a playlist opened from artist view, restore the correct tab
   useEffect(() => {
     if (artistReturnTab) {
       setActiveTab(artistReturnTab);
     }
   }, [artistReturnTab]);
 
-  // Get current artist from props or track
-  const currentArtist = artistName || currentTrack?.artist || "Travis Scott";
-  const artist = mockArtists[currentArtist] || mockArtists["Travis Scott"];
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchArtist = async () => {
+      const fallbackName = artist?.name || currentTrack?.artist;
+      if (!artist?.id && !fallbackName) {
+        setArtistData(null);
+        setError("Артист не выбран");
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        let resolvedId = artist?.id;
+        let resolvedName = fallbackName || "";
+
+        if (!resolvedId && resolvedName) {
+          const matches = await apiClient.getArtists({ search: resolvedName, limit: 1 });
+          resolvedId = matches[0]?.id;
+          resolvedName = matches[0]?.name || resolvedName;
+
+          if (!resolvedId) {
+            throw new Error("Артист не найден");
+          }
+        }
+
+        if (!resolvedId) {
+          throw new Error("Артист не найден");
+        }
+
+        const details = await apiClient.getArtistById(resolvedId);
+
+        if (cancelled) {
+          return;
+        }
+
+        const transformed: ArtistDetails = {
+          id: details.id,
+          name: details.name ?? resolvedName,
+          bio: details.bio,
+          image: resolveImage(details.imageUrl || details.imagePath),
+          coverImage: resolveImage(details.imageUrl || details.imagePath),
+          verified: details.verified ?? false,
+          monthlyListeners: details.monthlyListeners,
+          tracks: (details.tracks ?? []).map((track: any) => ({
+            id: track.id,
+            title: track.title,
+            duration: track.duration,
+            playsCount: track.playsCount,
+            image: resolveImage(track.coverUrl || track.coverPath, resolveImage(details.imageUrl || details.imagePath)),
+            audioUrl: resolveAudioUrl(track.audioUrl || track.audioPath),
+            lyricsUrl: undefined,
+          })),
+          albums: (details.albums ?? []).map((album: any) => {
+            // Убеждаемся, что тип альбома правильно установлен
+            // Проверяем тип альбома из API и нормализуем его
+            let albumType = album.type;
+            if (!albumType || typeof albumType !== 'string') {
+              albumType = 'single'; // По умолчанию single, если тип не указан
+            } else {
+              albumType = albumType.toLowerCase().trim();
+              if (albumType !== 'album' && albumType !== 'single') {
+                albumType = 'single'; // Если тип невалидный, используем single
+              }
+            }
+            return {
+            id: album.id,
+            title: album.title,
+            year: album.year,
+              type: albumType,
+            image: resolveImage(album.coverUrl || album.coverPath),
+            tracksCount: album._count?.tracks ?? 0,
+            };
+          }),
+        };
+
+        setArtistData(transformed);
+        setError(null);
+        
+        // Сохраняем треки в контекст для nextTrack
+        const tracksForContext = transformed.tracks.map((track: any) => ({
+          id: track.id,
+          title: track.title,
+          artist: transformed.name,
+          image: track.image || transformed.image,
+          genre: 'Unknown',
+          duration: track.duration || 0,
+          audioUrl: track.audioUrl,
+          playlistTitle: `${transformed.name} • ${t('popularTracks')}`,
+        }));
+        setCurrentPlaylistTracks(tracksForContext);
+        
+        // Проверяем, подписан ли пользователь на артиста
+        try {
+          const followingStatus = await apiClient.checkFollowing(resolvedId);
+          if (!cancelled) {
+            setIsFollowing(followingStatus.isFollowing);
+          }
+        } catch (err) {
+          // Если ошибка, считаем что не подписан
+          if (!cancelled) {
+            setIsFollowing(false);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error(err);
+          setArtistData(null);
+          setError(err instanceof Error ? err.message : "Не удалось загрузить артиста");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    fetchArtist();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [artist?.id, artist?.name, currentTrack?.artist, setCurrentPlaylistTracks, t]);
+
+  const displayArtistName = artistData?.name || artist?.name || currentTrack?.artist || "Unknown artist";
+
+  const filteredTracks = useMemo(() => {
+    if (!artistData?.tracks) return [];
+    if (!trackSearch.trim()) return artistData.tracks;
+
+    const query = trackSearch.toLowerCase();
+    return artistData.tracks.filter((track) => track.title.toLowerCase().includes(query));
+  }, [artistData?.tracks, trackSearch]);
+
+  const visibleTracks = showAllTracks ? filteredTracks : filteredTracks.slice(0, 5);
+
+  const filteredAlbums = useMemo(() => {
+    if (!artistData?.albums) return [];
+    if (activeTab === "albums") {
+      return artistData.albums.filter((album) => {
+        const albumType = album.type?.toLowerCase() || 'single';
+        return albumType === 'album';
+      });
+    }
+    if (activeTab === "singles") {
+      return artistData.albums.filter((album) => {
+        const albumType = album.type?.toLowerCase() || 'single';
+        return albumType === 'single';
+      });
+    }
+    return artistData.albums;
+  }, [artistData?.albums, activeTab]);
 
   const getMotionProps = (delay: number = 0) => {
     if (!animations) {
@@ -146,425 +233,416 @@ export function ArtistView({ onBack, artistName }: ArtistViewProps) {
     };
   };
 
-  const handlePlayTrack = (track: Track) => {
-    setCurrentTrack({
-      title: track.title,
-      artist: artist.name,
-      image: track.image || artist.image,
-      genre: "Hip-Hop",
-      duration: 180,
-    });
-    if (!isPlaying) {
-      togglePlay();
+  const handleSelectTrack = (track: ArtistDetails["tracks"][number]) => {
+    // Одинарный клик - только выделяем трек
+    const isCurrentTrack = currentTrack?.title === track.title && currentTrack?.artist === displayArtistName;
+    if (!isCurrentTrack) {
+      setCurrentTrack({
+        id: track.id,
+        title: track.title,
+        artist: displayArtistName,
+        image: track.image || artistData?.image || FALLBACK_ARTIST_IMAGE,
+        genre: "Unknown",
+        duration: track.duration ?? 0,
+        audioUrl: track.audioUrl,
+        lyricsUrl: track.lyricsUrl,
+        playlistTitle: `${displayArtistName} • ${t('popularTracks')}`,
+      });
+    }
+  };
+
+  const handlePlayTrack = (track: ArtistDetails["tracks"][number]) => {
+    // Двойной клик или прямой запуск - всегда начинаем трек заново
+    const isCurrentTrack = currentTrack?.title === track.title && currentTrack?.artist === displayArtistName;
+    
+    if (isCurrentTrack && isPlaying) {
+      // Если трек уже играет, перезапускаем с начала
+      seek(0);
+      setTimeout(() => {
+        if (!isPlaying) {
+          togglePlay();
+        }
+      }, 50);
+    } else {
+      // Устанавливаем новый трек или переключаемся на него
+      setCurrentTrack({
+        id: track.id,
+        title: track.title,
+        artist: displayArtistName,
+        image: track.image || artistData?.image || FALLBACK_ARTIST_IMAGE,
+        genre: "Unknown",
+        duration: track.duration ?? 0,
+        audioUrl: track.audioUrl,
+        lyricsUrl: track.lyricsUrl,
+        playlistTitle: `${displayArtistName} • ${t('popularTracks')}`,
+      });
     }
   };
 
   const handlePlayAll = () => {
-    if (artist.topTracks.length > 0) {
-      handlePlayTrack(artist.topTracks[0]);
+    if (filteredTracks.length === 0) return;
+
+    // Формируем полный список треков для плейлиста
+    const playlistTitle = `${displayArtistName} • ${t('popularTracks')}`;
+    const tracksForPlaylist = filteredTracks.map((track) => ({
+      id: track.id,
+      title: track.title,
+      artist: displayArtistName,
+      image: track.image || artistData?.image || FALLBACK_ARTIST_IMAGE,
+      genre: "Unknown",
+      duration: track.duration ?? 0,
+      audioUrl: track.audioUrl,
+      lyricsUrl: track.lyricsUrl,
+      playlistTitle,
+    }));
+
+    // Сохраняем треки в контекст для правильной работы nextTrack
+    setCurrentPlaylistTracks(tracksForPlaylist);
+
+    // Выбираем трек для воспроизведения
+    let trackToPlay;
+    
+    if (shuffle && tracksForPlaylist.length > 1) {
+      // Если shuffle включен, выбираем случайный трек
+      const randomArray = new Uint32Array(1);
+      crypto.getRandomValues(randomArray);
+      const randomIndex = Math.floor((randomArray[0] / (0xFFFFFFFF + 1)) * tracksForPlaylist.length);
+      trackToPlay = tracksForPlaylist[randomIndex];
+    } else {
+      // Если shuffle выключен, начинаем с первого трека
+      trackToPlay = tracksForPlaylist[0];
+    }
+
+    // Проверяем, является ли выбранный трек текущим
+    const isCurrentTrack = currentTrack?.id === trackToPlay.id && 
+                          currentTrack?.title === trackToPlay.title && 
+                          currentTrack?.playlistTitle === playlistTitle;
+
+    if (isCurrentTrack && isPlaying) {
+      // Если трек уже играет, ничего не делаем
+      return;
+    } else if (isCurrentTrack && !isPlaying) {
+      // Если трек на паузе, просто запускаем
+      togglePlay();
+    } else {
+      // Устанавливаем новый трек - setCurrentTrack автоматически запустит воспроизведение
+      setCurrentTrack(trackToPlay, playlistTitle);
     }
   };
 
-  const handleAlbumClick = (album: Album) => {
-    // Open album as a playlist and remember which tab we're on
-    openPlaylist({ 
-      title: album.title, 
-      artist: `${album.year} • ${artist.name}`, 
+  const handleFollowToggle = async () => {
+    if (!artistData?.id || isLoadingFollow) return;
+    
+    setIsLoadingFollow(true);
+    try {
+      if (isFollowing) {
+        await apiClient.unfollowArtist(artistData.id);
+        setIsFollowing(false);
+      } else {
+        await apiClient.followArtist(artistData.id);
+        setIsFollowing(true);
+      }
+      // Обновляем список артистов в библиотеке
+      window.dispatchEvent(new CustomEvent('artists:refresh'));
+    } catch (error) {
+      console.error('Error toggling follow:', error);
+    } finally {
+      setIsLoadingFollow(false);
+    }
+  };
+
+  const handleAlbumClick = (album: ArtistDetails["albums"][number]) => {
+    const albumType = (album.type === 'album' ? 'album' : 'single') as 'album' | 'single';
+    openPlaylist({
+      title: album.title,
+      artist: `${album.year || ""} • ${displayArtistName}`,
       image: album.image,
-      type: 'playlist',
-      returnToArtistTab: activeTab // Pass current tab so we can return to it
+      type: albumType,
+      albumId: album.id, // Передаем ID альбома для загрузки треков
+      albumType: albumType, // Передаем тип альбома
+      returnToArtistTab: activeTab,
     });
   };
 
-  const handleAlbumPlay = (e: React.MouseEvent, album: Album) => {
+  const handleAlbumPlay = (e: React.MouseEvent, album: ArtistDetails["albums"][number]) => {
     e.stopPropagation();
-    // Get random tracks for this album (since we don't have real album data)
-    const tracks = artist.topTracks.filter(track => track.album === album.title);
-    if (tracks.length === 0) {
-      // If no tracks match, use first track from artist
-      if (artist.topTracks.length > 0) {
-        handlePlayTrack(artist.topTracks[0]);
-      }
-    } else {
-      handlePlayTrack(tracks[0]);
+    const track = filteredTracks.find((t) => t.title.toLowerCase().includes(album.title.toLowerCase()));
+    if (track) {
+      handlePlayTrack(track);
+    } else if (filteredTracks.length > 0) {
+      handlePlayTrack(filteredTracks[0]);
     }
   };
 
-  const filteredAlbums = artist.albums.filter((album) => {
-    if (activeTab === "albums") return album.type === "album";
-    if (activeTab === "singles") return album.type === "single";
-    return true;
-  });
+  const monthlyListenersLabel = useMemo(() => {
+    if (!artistData?.monthlyListeners) return "0";
+    return artistData.monthlyListeners.toLocaleString("ru-RU");
+  }, [artistData?.monthlyListeners]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="w-10 h-10 animate-spin text-white/70" />
+      </div>
+    );
+  }
+
+  if (error || !artistData) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 text-center px-6">
+        <p className="text-white/80 text-lg">{error || "Артист не найден"}</p>
+        <div className="flex gap-3">
+          <button
+            onClick={onBack}
+            className="px-4 py-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
+          >
+            {t('back')}
+          </button>
+          <button
+            onClick={() => {
+              setArtistData(null);
+              setError(null);
+              setTrackSearch("");
+            }}
+            className="px-4 py-2 rounded-lg bg-[#1ED760] text-black font-semibold hover:bg-[#1DB954]"
+          >
+            {t('refreshStats')}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="glass-card rounded-2xl sm:rounded-3xl h-full overflow-hidden">
-      {/* Back button - positioned on artist cover */}
-      <button
-        onClick={onBack}
-        className="fixed top-8 left-6 z-50 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center hover:bg-black/80 fast-transition"
-      >
-        <ChevronLeft className="w-6 h-6 text-white" />
-      </button>
+    <div className="glass-card rounded-2xl sm:rounded-3xl h-full overflow-hidden flex flex-col">
+      <div className="relative flex-shrink-0">
+        <div className="absolute inset-0 bg-gradient-to-b from-[#1a1a1a] via-[#121212] to-[#0a0a0a]" />
 
-      {/* Scrollable content - everything scrolls together */}
-      <div 
-        className="h-full overflow-y-auto"
-        style={{
-          scrollbarWidth: "thin",
-          scrollbarColor: "rgba(255, 255, 255, 0.2) transparent",
-        }}
-      >
-        {/* Header with artist cover */}
-        <div className="relative h-[280px] sm:h-[340px]">
-          {/* Background image with gradient overlay */}
-          <div className="absolute inset-0 rounded-t-2xl sm:rounded-t-3xl overflow-hidden">
-            <ImageWithFallback
-              src={artist.coverImage}
-              alt={artist.name}
-              className="w-full h-full object-cover"
-            />
-            <div
-              className="absolute inset-0"
-              style={{
-                background: "linear-gradient(to bottom, rgba(18,18,18,0) 0%, rgba(18,18,18,0.5) 70%, rgba(18,18,18,1) 100%)",
-              }}
-            />
-          </div>
+        <div className="relative z-10 p-6 sm:p-8 flex flex-col gap-6">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-2 text-sm text-white/80 hover:text-white transition-colors w-fit"
+          >
+            <ChevronLeft className="w-5 h-5" />
+            {t('back')}
+          </button>
 
-          {/* Artist info */}
-          <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6">
-            <motion.div {...getMotionProps(0.1)} className="flex items-center gap-2 mb-2">
-              {artist.verified && (
-                <div className="flex items-center gap-2 text-xs sm:text-sm" style={{ color: "#1ED760" }}>
-                  <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center" style={{ background: "#1ED760" }}>
-                    <Check className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-black" />
+          <div className="flex flex-col sm:flex-row sm:items-end sm:gap-8">
+            <div className="flex-shrink-0">
+              <ImageWithFallback
+                src={artistData.image}
+                alt={artistData.name}
+                className="w-32 h-32 sm:w-48 sm:h-48 rounded-full shadow-2xl object-cover border-4 border-white/20"
+              />
+            </div>
+
+            <div className="flex-1 mt-4 sm:mt-0">
+              <div className="flex items-center gap-2 text-sm text-white/70">
+                <span>{t('verifiedArtist')}</span>
+                {artistData.verified && (
+                  <div className="w-5 h-5 rounded-full bg-[#1ED760] text-black flex items-center justify-center">
+                    <Check className="w-3 h-3" />
                   </div>
-                  <span style={{ fontWeight: "700" }}>{t('verifiedArtist')}</span>
-                </div>
-              )}
-            </motion.div>
+                )}
+              </div>
 
-            <motion.h1
-              {...getMotionProps(0.15)}
-              className="playlist-title-spotify"
-              style={{
-                fontSize: "clamp(2rem, 6vw, 4rem)",
-                color: "#ffffff",
-                textShadow: "0 4px 20px rgba(0,0,0,0.8)",
-                marginBottom: "0.5rem",
-              }}
-            >
-              {artist.name}
-            </motion.h1>
+              <motion.h1
+                {...getMotionProps(0.1)}
+                className="text-4xl sm:text-5xl md:text-6xl font-bold text-white mt-2 mb-4"
+              >
+                {artistData.name}
+              </motion.h1>
 
-            <motion.p {...getMotionProps(0.2)} className="text-xs sm:text-sm" style={{ color: "rgba(255,255,255,0.8)" }}>
-              {artist.monthlyListeners} {t('monthlyListeners')}
-            </motion.p>
+              <div className="flex flex-col gap-2 text-white/70 text-sm sm:text-base">
+                <span>
+                  {monthlyListenersLabel} {t('monthlyListeners')}
+                </span>
+                {artistData.bio && (
+                  <span className="text-white/60">{artistData.bio}</span>
+                )}
+              </div>
+            </div>
           </div>
         </div>
+      </div>
 
-        {/* Control buttons */}
-        <div className="px-4 sm:px-6 py-4 sm:py-6" style={{ background: "rgba(18,18,18,0.4)" }}>
-          <div className="flex items-center gap-3 sm:gap-4">
-            <motion.button
-              {...getMotionProps(0.25)}
+      <div className="p-4 sm:p-6 md:p-8 space-y-8 sm:space-y-10 flex-1 overflow-y-auto">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <button
               onClick={handlePlayAll}
-              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center hover:scale-110 fast-transition gpu-accelerated"
-              style={{
-                background: "#1ED760",
-                color: "#000",
-              }}
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#1ED760] flex items-center justify-center shadow-2xl hover:scale-105 transition-transform"
             >
-              <Play className="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" />
-            </motion.button>
-
-            <motion.button
-              {...getMotionProps(0.28)}
-              className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center hover:scale-110 fast-transition"
-              style={{ color: "rgba(255,255,255,0.6)" }}
+              <Play className="w-6 h-6 ml-1 text-black fill-black" />
+            </button>
+            <button 
+              onClick={toggleShuffle}
+              className={`rounded-full border px-4 py-2 text-sm flex items-center gap-2 transition-colors ${
+                shuffle 
+                  ? 'border-[#1ED760] bg-[#1ED760]/10 text-[#1ED760]' 
+                  : 'border-white/20 text-white hover:bg-white/10'
+              }`}
             >
-              <Shuffle className="w-4 h-4 sm:w-5 sm:h-5" />
-            </motion.button>
-
-            <motion.button
-              {...getMotionProps(0.31)}
-              className="hidden sm:block px-4 sm:px-6 py-1.5 sm:py-2 rounded-full border hover:scale-105 fast-transition"
-              style={{
-                borderColor: "rgba(255,255,255,0.2)",
-                color: "rgba(255,255,255,0.8)",
-                fontSize: "0.875rem",
-                fontWeight: "700",
-              }}
+              <Shuffle className="w-4 h-4" />
+              {t('shuffle')}
+            </button>
+            <button 
+              onClick={handleFollowToggle}
+              disabled={isLoadingFollow}
+              className={`rounded-full border px-4 py-2 text-sm flex items-center gap-2 transition-colors ${
+                isFollowing 
+                  ? 'border-white/20 bg-white/5 text-white/70 hover:bg-white/10' 
+                  : 'border-white/20 text-white hover:bg-white/10'
+              }`}
             >
-              {t('following')}
-            </motion.button>
-
-            <motion.button
-              {...getMotionProps(0.34)}
-              className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center hover:scale-110 fast-transition"
-              style={{ color: "rgba(255,255,255,0.6)" }}
-            >
-              <MoreHorizontal className="w-4 h-4 sm:w-5 sm:h-5" />
-            </motion.button>
+              {isFollowing && <Check className="w-4 h-4 fill-white/70" />}
+              {isLoadingFollow ? t('loadingArtists') : (isFollowing ? t('following') : t('follow'))}
+            </button>
           </div>
         </div>
 
-        {/* Content area */}
-        <div className="px-4 sm:px-6 pb-6">
-          <div className="max-w-7xl mx-auto">
-            {/* Tabs */}
-            <div className="flex gap-2 sm:gap-3 mb-6 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
-              <button
-                onClick={() => setActiveTab("tracks")}
-                className={`px-4 py-2 rounded-full text-sm sm:text-base whitespace-nowrap fast-transition ${
-                  activeTab === "tracks" ? "bg-white/10" : "hover:bg-white/5"
-                }`}
-                style={{
-                  color: activeTab === "tracks" ? "#ffffff" : "rgba(255,255,255,0.6)",
-                  fontWeight: activeTab === "tracks" ? "700" : "400",
-                }}
-              >
-                {t('popularTracks')}
-              </button>
-              <button
-                onClick={() => setActiveTab("albums")}
-                className={`px-4 py-2 rounded-full text-sm sm:text-base whitespace-nowrap fast-transition ${
-                  activeTab === "albums" ? "bg-white/10" : "hover:bg-white/5"
-                }`}
-                style={{
-                  color: activeTab === "albums" ? "#ffffff" : "rgba(255,255,255,0.6)",
-                  fontWeight: activeTab === "albums" ? "700" : "400",
-                }}
-              >
-                {t('albums')}
-              </button>
-              <button
-                onClick={() => setActiveTab("singles")}
-                className={`px-4 py-2 rounded-full text-sm sm:text-base whitespace-nowrap fast-transition ${
-                  activeTab === "singles" ? "bg-white/10" : "hover:bg-white/5"
-                }`}
-                style={{
-                  color: activeTab === "singles" ? "#ffffff" : "rgba(255,255,255,0.6)",
-                  fontWeight: activeTab === "singles" ? "700" : "400",
-                }}
-              >
-                {t('singlesAndEP')}
-              </button>
+        <section>
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-2xl font-bold text-white">{t('popularTracks')}</h2>
+              <p className="text-white/60 text-sm">
+                {artistData.name} • {t('topTracksDescription')}
+              </p>
             </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
-              {/* Main content area */}
-              <div className="lg:col-span-2">
-                {activeTab === "tracks" && (
-                  <div>
-                    {/* Section header */}
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="section-heading-spotify text-xl sm:text-2xl" style={{ color: "#ffffff" }}>
-                        {t('popularTracks')}
-                      </h2>
-                    </div>
-
-                    {/* Table header */}
-                    <div className="hidden sm:grid grid-cols-[50px_1fr_120px_80px] gap-3 sm:gap-4 px-3 sm:px-4 py-2.5 sm:py-3 mb-2 text-[10px] sm:text-xs uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.5)" }}>
-                      <div className="text-center">#</div>
-                      <div>{t('title')}</div>
-                      <div className="hidden md:block text-right">{t('plays')}</div>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                      </div>
-                    </div>
-                    
-                    {/* Tracks list */}
-                    <div className="space-y-1">
-                    {artist.topTracks.slice(0, showAllTracks ? 10 : 5).map((track, index) => {
-                      const isCurrentTrack = currentTrack?.title === track.title;
-                      return (
-                        <motion.button
-                          key={track.id}
-                          {...getMotionProps(0.05 * index)}
-                          onClick={() => handlePlayTrack(track)}
-                          className={`w-full flex items-center gap-3 sm:gap-4 p-2 rounded-lg hover:bg-white/5 fast-transition group ${
-                            isCurrentTrack ? "bg-white/10" : ""
-                          }`}
-                        >
-                          {/* Track number / play icon */}
-                          <div className="w-6 sm:w-8 text-center flex-shrink-0">
-                            <span 
-                              className="group-hover:hidden text-sm"
-                              style={{ color: isCurrentTrack ? "#1ED760" : "rgba(255,255,255,0.6)" }}
-                            >
-                              {index + 1}
-                            </span>
-                            <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 hidden group-hover:inline-block mx-auto" style={{ color: "#fff" }} fill="#fff" />
-                          </div>
-
-                          {/* Track image */}
-                          {track.image && (
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded overflow-hidden flex-shrink-0">
-                              <ImageWithFallback
-                                src={track.image}
-                                alt={track.title}
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                          )}
-
-                          {/* Track info */}
-                          <div className="flex-1 min-w-0 text-left">
-                            <div 
-                              className="truncate text-sm sm:text-base"
-                              style={{ 
-                                color: isCurrentTrack ? "#1ED760" : "#ffffff",
-                                fontWeight: isCurrentTrack ? "700" : "400",
-                              }}
-                            >
-                              {track.title}
-                            </div>
-                            {track.album && (
-                              <div className="text-xs sm:text-sm truncate" style={{ color: "rgba(255,255,255,0.6)" }}>
-                                {track.album}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Plays count */}
-                          <div className="hidden md:block text-xs sm:text-sm flex-shrink-0" style={{ color: "rgba(255,255,255,0.6)" }}>
-                            {track.plays}
-                          </div>
-
-                          {/* Duration */}
-                          <div className="text-xs sm:text-sm flex-shrink-0 w-10 sm:w-12 text-right" style={{ color: "rgba(255,255,255,0.6)" }}>
-                            {track.duration}
-                          </div>
-                        </motion.button>
-                      );
-                    })}
-                    </div>
-
-                    {/* See more / Show less button */}
-                    {artist.topTracks.length > 5 && (
-                      <motion.button
-                        {...getMotionProps(0.3)}
-                        onClick={() => setShowAllTracks(!showAllTracks)}
-                        className="mt-4 px-6 py-2.5 text-sm rounded-lg hover:bg-white/5 fast-transition"
-                        style={{
-                          color: "rgba(255,255,255,0.7)",
-                          fontWeight: "700",
-                        }}
-                      >
-                        {showAllTracks ? t('showLess') : t('seeMore')}
-                      </motion.button>
-                    )}
-                  </div>
-                )}
-
-                {(activeTab === "albums" || activeTab === "singles") && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
-                    {filteredAlbums.map((album, index) => {
-                      const isHovered = hoveredAlbum === album.title;
-
-                      return (
-                        <motion.div
-                          key={index}
-                          {...getMotionProps(0.05 * index)}
-                          onClick={() => handleAlbumClick(album)}
-                          onMouseEnter={() => setHoveredAlbum(album.title)}
-                          onMouseLeave={() => setHoveredAlbum(null)}
-                          className="group cursor-pointer relative overflow-hidden"
-                        >
-                          <div className="glass-card rounded-lg p-3 sm:p-4 hover:bg-white/5 hover:scale-105 hover:-translate-y-1 fast-transition gpu-accelerated relative">
-                            {/* Hover glow effect */}
-                            <div
-                              className="absolute inset-0 pointer-events-none fast-transition gpu-accelerated"
-                              style={{ 
-                                background: 'linear-gradient(135deg, rgba(30, 215, 96, 0.15) 0%, rgba(29, 185, 84, 0.10) 100%)',
-                                opacity: isHovered ? 1 : 0
-                              }}
-                            />
-
-                            <div className="aspect-square rounded overflow-hidden mb-3 relative">
-                              <ImageWithFallback
-                                src={album.image}
-                                alt={album.title}
-                                className="w-full h-full object-cover fast-transition gpu-accelerated"
-                                style={{
-                                  transform: isHovered ? 'scale(1.08) translateZ(0)' : 'scale(1) translateZ(0)'
-                                }}
-                              />
-                              
-                              {/* Play button on hover */}
-                              <motion.div
-                                className="absolute bottom-2 right-2"
-                                initial={{ opacity: 0, scale: 0, y: 8 }}
-                                animate={{
-                                  opacity: isHovered ? 1 : 0,
-                                  scale: isHovered ? 1 : 0,
-                                  y: isHovered ? 0 : 8,
-                                }}
-                                transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
-                              >
-                                <motion.button
-                                  onClick={(e) => handleAlbumPlay(e, album)}
-                                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center"
-                                  style={{
-                                    background: '#1ED760',
-                                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
-                                  }}
-                                  whileHover={{ scale: 1.05 }}
-                                  whileTap={{ scale: 0.95 }}
-                                >
-                                  <Play className="w-5 h-5 sm:w-6 sm:h-6 text-black fill-black ml-0.5" />
-                                </motion.button>
-                              </motion.div>
-                            </div>
-                            
-                            <div className="relative z-10">
-                              <div className="text-sm truncate" style={{ color: "#ffffff", fontWeight: "700" }}>
-                                {album.title}
-                              </div>
-                              <div className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.6)" }}>
-                                {album.year} • {album.type === "album" ? t('album') : "Single"}
-                              </div>
-                            </div>
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-                )}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="relative">
+                <Search className="w-4 h-4 text-white/50 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={trackSearch}
+                  onChange={(e) => setTrackSearch(e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-full pl-10 pr-4 py-2 text-sm text-white placeholder:text-white/40 focus:border-[#1ED760] focus:outline-none"
+                  placeholder={t('searchTracks')}
+                />
               </div>
-
-              {/* Sidebar with liked tracks */}
-              <div className="space-y-6 sm:space-y-8">
-                {/* Liked tracks */}
-                <div>
-                  <h3 className="text-sm sm:text-base mb-3 sm:mb-4" style={{ color: "#ffffff", fontWeight: "700" }}>
-                    {t('likedTracks')}
-                  </h3>
-                  <div className="glass-card rounded-xl p-3 sm:p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden flex-shrink-0">
-                        <ImageWithFallback
-                          src={artist.image}
-                          alt={artist.name}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs sm:text-sm" style={{ color: "rgba(255,255,255,0.8)" }}>
-                          {t('youLiked')} 12 {t('tracks')}
-                        </div>
-                        <div className="text-xs" style={{ color: "rgba(255,255,255,0.6)" }}>
-                          {t('by')} {artist.name}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <button
+                onClick={() => setShowAllTracks(!showAllTracks)}
+                className="text-sm text-white/70 hover:text-white transition-colors"
+              >
+                {showAllTracks ? t('showLess') : t('showAll')}
+              </button>
             </div>
           </div>
-        </div>
+
+          {filteredTracks.length === 0 ? (
+            <div className="text-center text-white/60 py-6">{t('nothingFound')}</div>
+          ) : (
+            <div className="space-y-2">
+              {visibleTracks.map((track, index) => {
+                const isCurrentTrack = currentTrack?.title === track.title && currentTrack?.artist === displayArtistName;
+                
+                return (
+                <motion.div
+                  key={track.id}
+                  {...getMotionProps(index * 0.05)}
+                  className="group flex items-center gap-4 p-3 rounded-2xl hover:bg-white/5 transition-colors cursor-pointer"
+                  onClick={() => handleSelectTrack(track)}
+                  onDoubleClick={() => handlePlayTrack(track)}
+                  style={isCurrentTrack ? {
+                    backgroundColor: 'rgba(30, 215, 96, 0.1)',
+                  } : {}}
+                >
+                  <span className="w-6 text-sm text-white/60">{index + 1}</span>
+                  <div className="w-14 h-14 rounded-lg overflow-hidden">
+                    <img
+                      src={track.image || artistData.image}
+                      alt={track.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white font-medium truncate">{track.title}</p>
+                    <p className="text-sm text-white/60 truncate">{displayArtistName}</p>
+                  </div>
+
+                  <div className="hidden md:block w-32 text-sm text-white/60">
+                    {track.playsCount?.toLocaleString("ru-RU") ?? "—"}
+                  </div>
+
+                  <div className="w-20 text-sm text-white/60 flex items-center gap-6">
+                    <span>
+                      {track.duration
+                        ? `${Math.floor(track.duration / 60)}:${String(track.duration % 60).padStart(2, "0")}`
+                        : "--:--"}
+                    </span>
+                    <TrackMenu
+                      track={{
+                        id: track.id,
+                        title: track.title,
+                        artist: displayArtistName,
+                        image: track.image || artistData.image,
+                        audioUrl: track.audioUrl,
+                        duration: track.duration || 0,
+                        genre: 'Unknown',
+                        playlistTitle: `${displayArtistName} • ${t('popularTracks')}`,
+                      }}
+                    />
+                  </div>
+                </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div>
+              <h2 className="text-2xl font-bold text-white">{t('discography')}</h2>
+              <p className="text-white/60 text-sm">{t('discographyDescription')}</p>
+            </div>
+
+            <div className="flex items-center gap-2 rounded-full bg-white/5 p-1">
+              {(["tracks", "albums", "singles"] as TabType[]).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-1.5 rounded-full text-sm transition-colors ${
+                    activeTab === tab ? "bg-white text-black font-medium" : "text-white/70 hover:text-white"
+                  }`}
+                >
+                  {tab === "tracks" ? t('all') : (tab === "albums" ? t('albums') : t('singles'))}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredAlbums.length === 0 ? (
+            <div className="text-center text-white/60 py-6">{t('nothingFound')}</div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              {filteredAlbums.map((album, index) => (
+                <motion.div
+                  key={album.id}
+                  {...getMotionProps(index * 0.05)}
+                  className="group relative rounded-2xl bg-gradient-to-b from-white/5 to-transparent p-3 cursor-pointer hover:from-white/10 transition-all"
+                  onClick={() => handleAlbumClick(album)}
+                >
+                  <div className="relative rounded-2xl overflow-hidden mb-3">
+                    <img src={album.image} alt={album.title} className="w-full aspect-square object-cover" />
+                    <button
+                      onClick={(e) => handleAlbumPlay(e, album)}
+                      className="absolute bottom-3 right-3 w-10 h-10 rounded-full bg-[#1ED760] text-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                    >
+                      <Play className="w-4 h-4 ml-1" />
+                    </button>
+                  </div>
+
+                  <h3 className="text-white font-medium truncate">{album.title}</h3>
+                  <p className="text-sm text-white/60">
+                    {album.year || "—"} • {album.type === "single" ? t('singleType') : t('albumType')}
+                  </p>
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

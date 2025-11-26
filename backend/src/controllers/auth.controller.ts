@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { validationResult } from 'express-validator';
@@ -17,13 +17,13 @@ const generateToken = (userId: string, username: string, email: string): string 
   return jwt.sign(
     { id: userId, username, email },
     jwtSecret,
-    { expiresIn: jwtExpiresIn }
+    { expiresIn: jwtExpiresIn } as jwt.SignOptions
   );
 };
 
 // POST /api/auth/register
 export const register = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response) => {
     // Валидация
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -72,12 +72,13 @@ export const register = asyncHandler(
       user,
       token,
     });
+    return;
   }
 );
 
 // POST /api/auth/login
 export const login = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response) => {
     // Валидация
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -116,12 +117,13 @@ export const login = asyncHandler(
       },
       token,
     });
+    return;
   }
 );
 
 // GET /api/auth/me
 export const getCurrentUser = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response) => {
     if (!req.user) {
       throw new AppError('User not authenticated', 401);
     }

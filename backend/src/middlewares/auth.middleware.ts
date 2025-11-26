@@ -19,7 +19,7 @@ declare global {
 // Middleware для проверки JWT токена
 export const authenticate = async (
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction
 ) => {
   try {
@@ -71,7 +71,7 @@ export const authenticate = async (
 // Опциональная аутентификация (не выбрасывает ошибку если токена нет)
 export const optionalAuth = async (
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction
 ) => {
   try {

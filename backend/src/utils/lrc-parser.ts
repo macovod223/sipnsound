@@ -1,5 +1,4 @@
 import fs from 'fs';
-import path from 'path';
 
 // Интерфейс для строки лирики
 export interface LyricLine {
@@ -44,14 +43,14 @@ export function parseLrcFile(lrcPath: string): ParsedLrc | null {
   try {
     // Проверка существования файла
     if (!fs.existsSync(lrcPath)) {
-      console.error(`LRC file not found: ${lrcPath}`);
+      // Файл не найден - это нормально для треков без текста
       return null;
     }
 
     const content = fs.readFileSync(lrcPath, 'utf-8');
     return parseLrcContent(content);
   } catch (error) {
-    console.error(`Error parsing LRC file: ${error}`);
+    // Ошибка парсинга - возвращаем null, файл будет проигнорирован
     return null;
   }
 }

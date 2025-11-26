@@ -1,8 +1,11 @@
 import { motion } from 'motion/react';
 import { useSettings } from './SettingsContext';
 import { usePlayer } from './PlayerContext';
-import { Music, User, Disc, ListMusic, Play } from 'lucide-react';
-import { useState, useMemo } from 'react';
+import { Music, User, Disc, ListMusic, Play, Loader2 } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { apiClient, ArtistSummary, Track as ApiTrack } from '../api/client';
+import { resolveAudioUrl, resolveImageUrl } from '@/utils/media';
+import { formatDuration } from '../utils/time';
 
 interface SearchResult {
   type: 'track' | 'artist' | 'playlist' | 'album';
@@ -17,166 +20,136 @@ interface SearchViewProps {
   onClose: () => void;
 }
 
-// Mock data для поиска
-const mockSearchData: SearchResult[] = [
-  // Треки
-  {
-    type: 'track',
-    title: 'Blinding Lights',
-    subtitle: 'The Weeknd',
-    image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-    data: { artist: 'The Weeknd', genre: 'Synthwave', duration: 200 }
-  },
-  {
-    type: 'track',
-    title: 'Starboy',
-    subtitle: 'The Weeknd ft. Daft Punk',
-    image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-    data: { artist: 'The Weeknd', genre: 'R&B', duration: 230 }
-  },
-  {
-    type: 'track',
-    title: 'SICKO MODE',
-    subtitle: 'Travis Scott',
-    image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-    data: { artist: 'Travis Scott', genre: 'Hip-Hop', duration: 312 }
-  },
-  {
-    type: 'track',
-    title: 'Goosebumps',
-    subtitle: 'Travis Scott',
-    image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-    data: { artist: 'Travis Scott', genre: 'Hip-Hop', duration: 243 }
-  },
-  {
-    type: 'track',
-    title: 'HUMBLE.',
-    subtitle: 'Kendrick Lamar',
-    image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400',
-    data: { artist: 'Kendrick Lamar', genre: 'Hip-Hop', duration: 177 }
-  },
-  {
-    type: 'track',
-    title: 'DNA.',
-    subtitle: 'Kendrick Lamar',
-    image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400',
-    data: { artist: 'Kendrick Lamar', genre: 'Hip-Hop', duration: 185 }
-  },
-  {
-    type: 'track',
-    title: 'One Dance',
-    subtitle: 'Drake ft. Wizkid & Kyla',
-    image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-    data: { artist: 'Drake', genre: 'Dancehall', duration: 173 }
-  },
-  {
-    type: 'track',
-    title: 'God\'s Plan',
-    subtitle: 'Drake',
-    image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-    data: { artist: 'Drake', genre: 'Hip-Hop', duration: 198 }
-  },
-  
-  // Артисты
-  {
-    type: 'artist',
-    title: 'The Weeknd',
-    subtitle: '85M monthly listeners',
-    image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-  },
-  {
-    type: 'artist',
-    title: 'Travis Scott',
-    subtitle: '70M monthly listeners',
-    image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-  },
-  {
-    type: 'artist',
-    title: 'Kendrick Lamar',
-    subtitle: '60M monthly listeners',
-    image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400',
-  },
-  {
-    type: 'artist',
-    title: 'Drake',
-    subtitle: '90M monthly listeners',
-    image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-  },
-  
-  // Плейлисты
-  {
-    type: 'playlist',
-    title: 'Daily Mix 1',
-    subtitle: 'Travis Scott, A$AP Rocky and more',
-    image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-  },
-  {
-    type: 'playlist',
-    title: 'Peaceful Piano',
-    subtitle: 'Relax and indulge with beautiful piano pieces',
-    image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400',
-  },
-  {
-    type: 'playlist',
-    title: 'RapCaviar',
-    subtitle: 'New music from Travis Scott, Drake and more',
-    image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-  },
-  {
-    type: 'playlist',
-    title: 'This Is Yeat',
-    subtitle: 'This is Yeat. The essential tracks, all in one playlist.',
-    image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-  },
-  
-  // Альбомы
-  {
-    type: 'album',
-    title: 'After Hours',
-    subtitle: 'The Weeknd · 2020',
-    image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-  },
-  {
-    type: 'album',
-    title: 'ASTROWORLD',
-    subtitle: 'Travis Scott · 2018',
-    image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-  },
-  {
-    type: 'album',
-    title: 'DAMN.',
-    subtitle: 'Kendrick Lamar · 2017',
-    image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400',
-  },
-  {
-    type: 'album',
-    title: 'Certified Lover Boy',
-    subtitle: 'Drake · 2021',
-    image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-  },
-];
+const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400';
+
 
 export function SearchView({ searchQuery, onClose }: SearchViewProps) {
   const { t } = useSettings();
   const { setCurrentTrack, openPlaylist, openArtistView } = usePlayer();
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'track' | 'artist' | 'playlist' | 'album'>('all');
+  const [remoteArtists, setRemoteArtists] = useState<ArtistSummary[]>([]);
+  const [remoteTracks, setRemoteTracks] = useState<ApiTrack[]>([]);
+  const [remoteAlbums, setRemoteAlbums] = useState<Array<{id: string; title: string; year?: number; type: string; artist: {id: string; name: string}; coverUrl?: string; coverPath?: string}>>([]);
+  const [isRemoteLoading, setIsRemoteLoading] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const trimmedQuery = searchQuery.trim();
+  const normalizedQuery = trimmedQuery.toLowerCase();
+  const upperCaseQuery = trimmedQuery.toUpperCase();
 
-  // Фильтрация результатов поиска
-  const filteredResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    
-    const query = searchQuery.toLowerCase();
-    let results = mockSearchData.filter(item => 
-      item.title.toLowerCase().includes(query) || 
-      item.subtitle?.toLowerCase().includes(query)
-    );
-
-    if (selectedCategory !== 'all') {
-      results = results.filter(item => item.type === selectedCategory);
+  useEffect(() => {
+    if (!trimmedQuery) {
+      setRemoteArtists([]);
+      setRemoteTracks([]);
+      setRemoteAlbums([]);
+      setRemoteError(null);
+      return;
     }
 
-    return results;
-  }, [searchQuery, selectedCategory]);
+    let cancelled = false;
+    setIsRemoteLoading(true);
+    setRemoteError(null);
+
+    const handler = setTimeout(async () => {
+      const fetchTracks = async (query: string) => {
+        const resp = await apiClient.getTracks({ search: query, limit: 8, includeAll: true });
+        return resp?.tracks ?? [];
+      };
+
+      try {
+        const artistsPromise = apiClient.getArtists({ search: trimmedQuery, limit: 8 });
+        const albumsPromise = apiClient.getAlbums({ search: trimmedQuery, limit: 8 });
+
+        const queryVariants = Array.from(
+          new Set([trimmedQuery, upperCaseQuery, normalizedQuery].filter(Boolean))
+        ) as string[];
+
+        let tracks: ApiTrack[] = [];
+        for (const variant of queryVariants) {
+          tracks = await fetchTracks(variant);
+          if (tracks.length) break;
+        }
+
+        const [artistsData, albumsData] = await Promise.all([artistsPromise, albumsPromise]);
+
+        if (!cancelled) {
+          setRemoteArtists(artistsData);
+          setRemoteTracks(tracks);
+          setRemoteAlbums(albumsData);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Search error', err);
+          setRemoteArtists([]);
+          setRemoteTracks([]);
+          setRemoteAlbums([]);
+          setRemoteError('Не удалось загрузить результаты');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsRemoteLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(handler);
+    };
+  }, [trimmedQuery, normalizedQuery, upperCaseQuery]);
+
+  const backendResults = useMemo<SearchResult[]>(() => {
+    if (!normalizedQuery) return [];
+    const matchesQuery = (value?: string | null) =>
+      normalizedQuery ? (value || '').toLowerCase().includes(normalizedQuery) : true;
+
+    const trackResults: SearchResult[] = remoteTracks
+      .filter(
+        (track) =>
+          matchesQuery(track.title) ||
+          matchesQuery(track.artist?.name) ||
+          matchesQuery(track.album?.title)
+      )
+      .map((track) => ({
+      type: 'track',
+      title: track.title,
+      subtitle: track.artist?.name,
+        image:
+          resolveImageUrl(
+            track.coverUrl || (track as any).coverPath || track.album?.coverUrl || null,
+            FALLBACK_IMAGE
+          ) || FALLBACK_IMAGE,
+      data: track,
+    }));
+
+    const artistResults: SearchResult[] = remoteArtists
+      .filter((artist) => matchesQuery(artist.name) || matchesQuery(artist.bio))
+      .map((artist) => ({
+      type: 'artist',
+      title: artist.name,
+      subtitle: artist.bio || undefined,
+        image: resolveImageUrl(artist.imageUrl || (artist as any).imagePath, FALLBACK_IMAGE) || FALLBACK_IMAGE,
+      data: artist,
+    }));
+
+    const albumResults: SearchResult[] = remoteAlbums
+      .filter((album) => matchesQuery(album.title) || matchesQuery(album.artist?.name))
+      .map((album) => ({
+        type: 'album',
+        title: album.title,
+        subtitle: `${album.artist?.name || 'Unknown'} • ${album.year || '—'} • ${album.type === 'single' ? 'Сингл' : 'Альбом'}`,
+        image: resolveImageUrl(album.coverUrl || album.coverPath, FALLBACK_IMAGE) || FALLBACK_IMAGE,
+        data: album,
+      }));
+
+    return [...trackResults, ...artistResults, ...albumResults];
+  }, [remoteTracks, remoteArtists, remoteAlbums, normalizedQuery, t]);
+
+  const filteredResults = useMemo(() => {
+    if (selectedCategory === 'all') {
+      return backendResults;
+    }
+    return backendResults.filter((item) => item.type === selectedCategory);
+  }, [backendResults, selectedCategory]);
 
   // Группировка результатов по типу для режима "all"
   const groupedResults = useMemo(() => {
@@ -192,16 +165,52 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
     return groups;
   }, [filteredResults, selectedCategory]);
 
-  const handleItemClick = (item: SearchResult) => {
+  const handleItemClick = async (item: SearchResult) => {
     switch (item.type) {
       case 'track':
-        setCurrentTrack({
-          title: item.title,
-          artist: item.subtitle || '',
-          image: item.image,
-          genre: item.data?.genre || 'Music',
-          duration: item.data?.duration || 180,
-        });
+        {
+          let trackData = item.data as ApiTrack | undefined;
+
+          if (trackData?.id) {
+            try {
+              const response = await apiClient.getTrackById(trackData.id);
+              trackData = response.track as ApiTrack;
+            } catch (error) {
+              console.error('Track hydrate error', error);
+            }
+          }
+
+          const resolvedAudioUrl = resolveAudioUrl(
+            trackData?.audioUrl || (trackData as any)?.audioPath
+          );
+          const resolvedImage =
+            resolveImageUrl(
+              trackData?.coverUrl ||
+                (trackData as any)?.coverPath ||
+                trackData?.album?.coverUrl ||
+                (trackData as any)?.album?.coverPath ||
+                trackData?.artist?.imageUrl ||
+                (trackData as any)?.artist?.imagePath,
+              item.image || FALLBACK_IMAGE
+            ) || item.image || FALLBACK_IMAGE;
+
+          setCurrentTrack(
+            {
+              id: trackData?.id,
+              title: trackData?.title || item.title,
+              artist: trackData?.artist?.name || item.subtitle || '',
+              image: resolvedImage,
+              genre: trackData?.genre?.name || 'Music',
+              duration: trackData?.duration || 180,
+              audioUrl: resolvedAudioUrl,
+              lyrics: trackData?.lyrics,
+              lyricsUrl: undefined,
+              playlistTitle: 'Search Results',
+            },
+            'Search Results'
+          );
+          onClose();
+        }
         break;
       case 'artist':
         openArtistView(item.title);
@@ -216,11 +225,20 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
         onClose();
         break;
       case 'album':
+        {
+          const album = item.data as any;
+          if (album?.id) {
+            const albumType = album.type?.toLowerCase() === 'album' ? 'album' : 'single';
         openPlaylist({
-          title: item.title,
-          artist: item.subtitle || '',
+              title: album.title || item.title,
+              artist: `${album.year || ''} • ${album.artist?.name || 'Unknown'}`,
           image: item.image,
+              type: albumType,
+              albumId: album.id,
+              albumType: albumType,
         });
+          }
+        }
         onClose();
         break;
     }
@@ -244,13 +262,7 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
     }
   };
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  if (!searchQuery.trim()) {
+  if (!trimmedQuery) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
@@ -288,6 +300,20 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
           </button>
         ))}
       </div>
+
+      {(isRemoteLoading || remoteError) && (
+        <div className="mb-4 flex items-center gap-3 text-sm" style={{ color: '#b3b3b3' }}>
+          {isRemoteLoading && (
+            <span className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              {'Поиск...'}
+            </span>
+          )}
+          {!isRemoteLoading && remoteError && (
+            <span className="text-red-400">{remoteError}</span>
+          )}
+        </div>
+      )}
 
       {/* Results */}
       <div className="flex-1 overflow-y-auto scrollbar-hide">

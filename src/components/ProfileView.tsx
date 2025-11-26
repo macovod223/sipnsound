@@ -2,25 +2,44 @@ import { motion } from 'motion/react';
 import { ArrowLeft, Camera, User, LogOut } from 'lucide-react';
 import { useSettings } from './SettingsContext';
 import { useAuth } from './AuthContext';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ImageWithFallback } from '@/components/timurgenii/ImageWithFallback';
 import { toast } from 'sonner';
 
 export function ProfileView() {
   const { t, animations } = useSettings();
   const { user, updateProfile, logout } = useAuth();
-  const [username, setUsername] = useState(user?.username || '');
-  const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
+  const [profileName, setProfileName] = useState(user?.displayName || user?.username || '');
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSave = () => {
-    if (!username.trim()) {
+  useEffect(() => {
+    setProfileName(user?.displayName || user?.username || '');
+    setAvatarUrl(user?.avatarUrl || '');
+    setIsEditing(false);
+  }, [user]);
+
+  const handleSave = async () => {
+    if (!profileName.trim()) {
       toast.error(t('usernameCannotBeEmpty'));
       return;
     }
 
-    updateProfile(username, avatarUrl);
+    setIsSaving(true);
+    const result = await updateProfile({
+      username: profileName.trim(),
+      displayName: profileName.trim(),
+      avatarUrl: avatarUrl || null,
+    });
+    setIsSaving(false);
+
+    if (!result.success) {
+      toast.error(result.message || t('profileUpdatedError'));
+      return;
+    }
+
     setIsEditing(false);
     toast.success(t('profileUpdatedSuccess'));
   };
@@ -118,7 +137,7 @@ export function ProfileView() {
               >
                 <ImageWithFallback
                   src={avatarUrl || 'https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?w=400'}
-                  alt={username}
+                  alt={profileName || user?.username || 'User'}
                   className="w-full h-full object-cover"
                 />
               </div>
@@ -156,9 +175,9 @@ export function ProfileView() {
               </label>
               <input
                 type="text"
-                value={username}
+                value={profileName}
                 onChange={(e) => {
-                  setUsername(e.target.value);
+                  setProfileName(e.target.value);
                   setIsEditing(true);
                 }}
                 className="w-full glass px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-[#1ED760]/50 fast-transition"
@@ -205,8 +224,8 @@ export function ProfileView() {
               </button>
               <button
                 onClick={() => {
-                  setUsername(user?.username || '');
-                  setAvatarUrl(user?.avatar || '');
+                  setProfileName(user?.displayName || user?.username || '');
+                  setAvatarUrl(user?.avatarUrl || '');
                   setIsEditing(false);
                 }}
                 className="px-6 py-3 rounded-xl glass fast-transition hover:scale-105 gpu-accelerated text-white"

@@ -1,39 +1,120 @@
-import { Play, Heart, Pause, User } from 'lucide-react';
+import { Play, Heart, Pause } from 'lucide-react';
 import { useState } from 'react';
-import { usePlayer, playlistsData } from './PlayerContext';
+import { usePlayer } from './PlayerContext';
 import { useSettings } from './SettingsContext';
 import { MusicVisualizer } from './UI';
 import { motion } from 'motion/react';
+import { apiClient } from '../api/client';
 
 interface QuickAccessCardProps {
   title: string;
   image: string;
   index: number;
-  type?: 'liked' | 'playlist' | 'artist';
+  type?: 'liked' | 'playlist' | 'artist' | 'album';
+  id?: string;
   onHoverChange?: (playlistName: string | null) => void;
 }
 
-export function QuickAccessCard({ title, image, index, type = 'playlist', onHoverChange }: QuickAccessCardProps) {
+export function QuickAccessCard({ title, image, index, type = 'playlist', id, onHoverChange }: QuickAccessCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const { setCurrentTrack, togglePlay, currentTrack, isPlaying: globalIsPlaying, openPlaylist, openArtistView } = usePlayer();
   const { animations } = useSettings();
   const isCurrentTrack = currentTrack?.playlistTitle === title;
   const isPlaying = isCurrentTrack && globalIsPlaying;
 
-  const handleCardClick = () => {
+  const handleCardClick = async () => {
     if (type === 'artist') {
-      openArtistView(title);
+      openArtistView({ id, name: title });
+    } else if (type === 'album' && id) {
+      // Загружаем данные альбома для получения правильного типа
+      try {
+        const albums = await apiClient.getAlbums({ limit: 1000 });
+        const album = albums.find(a => a.id === id);
+        const albumType = album?.type === 'album' ? 'album' : 'single';
+        openPlaylist({ 
+          title, 
+          artist: album?.artist?.name || 'Альбом', 
+          image, 
+          type: albumType,
+          albumId: id,
+          albumType: albumType,
+        });
+      } catch (error) {
+        console.error('Error loading album:', error);
+        // Fallback на 'album' если не удалось загрузить
+        openPlaylist({ 
+          title, 
+          artist: 'Альбом', 
+          image, 
+          type: 'album',
+          albumId: id,
+          albumType: 'album',
+        });
+      }
     } else {
       openPlaylist({ title, artist: 'Your playlist', image, type });
     }
   };
 
-  const handlePlay = (e: React.MouseEvent) => {
+  const handlePlay = async (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // Get first track from this playlist or artist
-    const tracks = playlistsData[title];
-    if (!tracks || tracks.length === 0) return;
+    // Для "Liked Songs" открываем плейлист
+    if (title === 'Liked Songs') {
+      openPlaylist({
+        title: 'Liked Songs',
+        artist: 'Ваши любимые треки',
+        image: '',
+        type: 'liked',
+      });
+      return;
+    }
+    
+    // Для артистов и альбомов из БД просто открываем их
+    if (type === 'artist' && id) {
+      openArtistView({ id, name: title });
+      return;
+    }
+    
+    if (type === 'album' && id) {
+      // Загружаем данные альбома для получения правильного типа
+      try {
+        const albums = await apiClient.getAlbums({ limit: 1000 });
+        const album = albums.find(a => a.id === id);
+        const albumType = album?.type === 'album' ? 'album' : 'single';
+        openPlaylist({ 
+          title, 
+          artist: album?.artist?.name || 'Альбом', 
+          image, 
+          type: albumType,
+          albumId: id,
+          albumType: albumType,
+        });
+      } catch (error) {
+        console.error('Error loading album:', error);
+        // Fallback на 'album' если не удалось загрузить
+        openPlaylist({ 
+          title, 
+          artist: 'Альбом', 
+          image, 
+          type: 'album',
+          albumId: id,
+          albumType: 'album',
+        });
+      }
+      return;
+    }
+    
+    const tracks: any[] = [];
+    if (!tracks || tracks.length === 0) {
+      // Если треков нет, открываем плейлист/артиста
+      if (type === 'artist') {
+        openArtistView({ id, name: title });
+      } else {
+        openPlaylist({ title, artist: 'Your playlist', image, type });
+      }
+      return;
+    }
     
     const firstTrack = tracks[0];
     const isCurrentPlaylistPlaying = currentTrack?.playlistTitle === title;
@@ -180,13 +261,14 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', onHove
           )}
         </div>
 
-        {/* Play button - unified Spotify style */}
+        {/* Play button - unified Spotify style - показываем только если есть треки или это "Liked Songs" */}
+        {(title === 'Liked Songs') && (
         <motion.div
           className="flex-shrink-0 absolute right-2 z-20"
           initial={{ opacity: 0, scale: 0 }}
           animate={{
-            opacity: isHovered || isPlaying || type === 'artist' ? 1 : 0,
-            scale: isHovered || isPlaying || type === 'artist' ? 1 : 0,
+              opacity: isHovered || isPlaying ? 1 : 0,
+              scale: isHovered || isPlaying ? 1 : 0,
           }}
           transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
           onClick={handlePlay}
@@ -207,6 +289,7 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', onHove
                 )}
               </motion.button>
         </motion.div>
+        )}
       </div>
     </div>
   );

@@ -1,13 +1,15 @@
 import { motion } from 'motion/react';
 import { Music, Clock, Heart, ListMusic, TrendingUp, Play, ArrowLeft, Pause } from 'lucide-react';
-import { usePlayer, playlistsData } from './PlayerContext';
+import { usePlayer } from './PlayerContext';
 import { useSettings } from './SettingsContext';
 import { useState, useEffect } from 'react';
+import { apiClient } from '../api/client';
+import { resolveImageUrl } from '../utils/media';
 
 type CategoryView = 'browse' | 'liked-songs' | 'playlists' | 'albums' | 'artists' | 'recently-played';
 
 export function LibraryView() {
-  const { setCurrentTrack, currentTrack, isPlaying, togglePlay, openArtistView, closePlaylist, openPlaylist, libraryReturnCategory } = usePlayer();
+  const { setCurrentTrack, currentTrack, isPlaying, togglePlay, openArtistView, closePlaylist, openPlaylist, libraryReturnCategory, likedTracksList } = usePlayer();
   const settings = useSettings();
   const [hoveredTrack, setHoveredTrack] = useState<string | null>(null);
   const [hoveredPlaylist, setHoveredPlaylist] = useState<string | null>(null);
@@ -20,115 +22,141 @@ export function LibraryView() {
     }
   }, [libraryReturnCategory]);
 
-  // Get all tracks from playlists for categories
-  const getAllTracks = () => {
-    const allTracks: any[] = [];
-    Object.values(playlistsData).forEach(tracks => {
-      allTracks.push(...tracks);
-    });
-    return allTracks;
-  };
-
-  const allTracks = getAllTracks();
+  // State for liked tracks
+  const [allTracks, setAllTracks] = useState<any[]>([]);
   
-  // Playlist images mapping (from main page)
-  const playlistImages: Record<string, string> = {
-    'Liked Songs': '',
-    'This Is Yeat': 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-    'DJ': 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-    'LyfeStyle': 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-    'Tea Lovers': 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400',
-    'From Sparta to Padre': 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400',
-    'Daily Mix 1': 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-    'Daily Mix 2': 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400',
-    'Daily Mix 3': 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-    'Daily Mix 4': 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-    'Daily Mix 5': 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400',
-    'Daily Mix 6': 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=400',
-    'Peaceful Piano': 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400',
-    'Deep Focus': 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=400',
-    'Jazz Vibes': 'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=400',
-    'Chill Hits': 'https://images.unsplash.com/photo-1509824227185-9c5a01ceba0d?w=400',
-    'All Out 2010s': 'https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=400',
-  };
+  // Load liked tracks
+  useEffect(() => {
+    const loadLikedTracks = async () => {
+      try {
+        const response = await apiClient.getLikedTracks();
+        if (response && response.tracks) {
+          const formattedTracks = response.tracks.map((track: any) => ({
+            id: track.id,
+            title: track.title,
+            artist: typeof track.artist === 'string' ? track.artist : (track.artist?.name || 'Unknown Artist'),
+            image: track.image || track.coverUrl || track.coverPath || '',
+            genre: typeof track.genre === 'string' ? track.genre : (track.genre?.name || 'Unknown'),
+            duration: track.duration || 0,
+            audioUrl: track.audioUrl || track.audioPath,
+            playsCount: track.playsCount || 0,
+            album: typeof track.album === 'string' ? track.album : (track.album?.title || 'Unknown Album'),
+          }));
+          setAllTracks(formattedTracks);
+        } else {
+          setAllTracks([]);
+        }
+      } catch (error) {
+        setAllTracks([]);
+      }
+    };
+    loadLikedTracks();
+  }, [likedTracksList]);
+  
+  // State for playlists from database
+  const [playlistsData, setPlaylistsData] = useState<Array<{ id: string; title: string; count: number; image: string }>>([]);
+  const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(false);
 
-  // Get unique playlists
-  const getPlaylists = () => {
-    return Object.keys(playlistsData).map((key) => ({
-      title: key,
-      count: playlistsData[key].length,
-      image: playlistImages[key] || 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-    }));
-  };
+  // State for albums and artists from database
+  const [albumsData, setAlbumsData] = useState<Array<{ title: string; artist: string; year?: number; image: string; id: string; type: 'album' | 'single' }>>([]);
+  const [artistsData, setArtistsData] = useState<Array<{ name: string; image: string; id: string }>>([]);
+  const [isLoadingAlbums, setIsLoadingAlbums] = useState(false);
+  const [isLoadingArtists, setIsLoadingArtists] = useState(false);
 
-  const playlists = getPlaylists();
+  // Load albums and artists in parallel for better performance
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoadingAlbums(true);
+      setIsLoadingArtists(true);
+      try {
+        // Загружаем альбомы и артистов параллельно
+        const [albums, artists] = await Promise.all([
+          apiClient.getAlbums({ limit: 100 }),
+          apiClient.getFollowingArtists(),
+        ]);
 
-  // Mock albums data
-  const albumsData = [
-    { title: 'Episodes', artist: 'Anééow', year: 2025, image: 'https://images.unsplash.com/photo-1646900614911-378fd0c1d86d?w=400' },
-    { title: 'Back Cooking', artist: 'Gaviin', year: 2025, image: 'https://images.unsplash.com/photo-1601643157091-ce5c665179ab?w=400' },
-    { title: 'Only Time', artist: 'Gaviin', year: 2025, image: 'https://images.unsplash.com/photo-1629426958038-a4cb6e3830a0?w=400' },
-    { title: 'Trap House (20th Anniversary Deluxe...', artist: 'Anúkou', year: 2026, image: 'https://images.unsplash.com/photo-1503853585905-d53f628e46ac?w=400' },
-    { title: 'I Need You', artist: 'Gaviin', year: 2025, image: 'https://images.unsplash.com/photo-1624703307604-744ec383cbf4?w=400' },
-    { title: 'LICKS', artist: 'Gaviin', year: 2025, image: 'https://images.unsplash.com/photo-1692271931628-adc2b16670dd?w=400' },
-    { title: 'Voices / Psycho', artist: 'Gaviin', year: 2025, image: 'https://images.unsplash.com/photo-1651597035515-36e4b2722fcb?w=400' },
-    { title: 'Hit (feat. Gucci Mane)', artist: 'Gaviin', year: 2025, image: 'https://images.unsplash.com/photo-1581297848080-c84ac0438210?w=400' },
-    { title: 'Preference', artist: 'Gaviin', year: 2025, image: 'https://images.unsplash.com/photo-1646900614911-378fd0c1d86d?w=400' },
-    { title: 'You Know Why', artist: 'Gaviin', year: 2025, image: 'https://images.unsplash.com/photo-1601643157091-ce5c665179ab?w=400' },
-    { title: 'Preference', artist: 'Gaviin', year: 2026, image: 'https://images.unsplash.com/photo-1629426958038-a4cb6e3830a0?w=400' },
-    { title: "You Don't Love Me", artist: 'Gaviin', year: 2024, image: 'https://images.unsplash.com/photo-1503853585905-d53f628e46ac?w=400' },
-    { title: 'Breath of Fresh Air', artist: 'Anúkou', year: 2024, image: 'https://images.unsplash.com/photo-1624703307604-744ec383cbf4?w=400' },
-    { title: 'Greatest Of All Trappers (Gangsta...', artist: 'Anúkou', year: 2024, image: 'https://images.unsplash.com/photo-1692271931628-adc2b16670dd?w=400' },
-  ];
+        const formattedAlbums = albums.map((album) => ({
+          id: album.id,
+          title: album.title,
+          artist: album.artist.name,
+          year: album.year,
+          image: album.coverUrl || album.coverPath || '',
+          type: album.type,
+        }));
 
-  // Mock artists data
-  const artistsData = [
-    { name: 'Deftones', image: 'https://images.unsplash.com/photo-1675859427928-fe41277572b4?w=400' },
-    { name: 'Paul McCartney', image: 'https://images.unsplash.com/photo-1724333191536-4988f7ce0674?w=400' },
-    { name: 'The Chemical Brothers', image: 'https://images.unsplash.com/photo-1606695199137-dc033cf04204?w=400' },
-    { name: 'Aarne', image: 'https://images.unsplash.com/photo-1712530967389-e4b5b16b8500?w=400' },
-    { name: 'Noggano', image: 'https://images.unsplash.com/photo-1546405524-5714e4492a01?w=400' },
-    { name: 'GUF', image: 'https://images.unsplash.com/photo-1604514288114-3851479df2f2?w=400' },
-    { name: 'Mac Miller', image: 'https://images.unsplash.com/photo-1510731491328-7363eecd7b2d?w=400' },
-    { name: 'Led Zeppelin', image: 'https://images.unsplash.com/photo-1675099348165-1c9056e5e492?w=400' },
-    { name: 'The Doors', image: 'https://images.unsplash.com/photo-1675859427928-fe41277572b4?w=400' },
-    { name: 'David Guetta', image: 'https://images.unsplash.com/photo-1724333191536-4988f7ce0674?w=400' },
-    { name: 'The Prodigy', image: 'https://images.unsplash.com/photo-1606695199137-dc033cf04204?w=400' },
-    { name: 'JPEGMAFIA', image: 'https://images.unsplash.com/photo-1712530967389-e4b5b16b8500?w=400' },
-    { name: 'FRIENDLY THUG', image: 'https://images.unsplash.com/photo-1546405524-5714e4492a01?w=400' },
-    { name: 'SABMO', image: 'https://images.unsplash.com/photo-1604514288114-3851479df2f2?w=400' },
-    { name: 'Bond', image: 'https://images.unsplash.com/photo-1510731491328-7363eecd7b2d?w=400' },
-    { name: 'Zemfira', image: 'https://images.unsplash.com/photo-1675099348165-1c9056e5e492?w=400' },
-  ];
+        const formattedArtists = artists.map((artist) => ({
+          id: artist.id,
+          name: artist.name,
+          image: artist.imageUrl || artist.imagePath || '',
+        }));
+
+        setAlbumsData(formattedAlbums);
+        setArtistsData(formattedArtists);
+      } catch (error) {
+        // Ошибки уже обрабатываются toast в apiClient
+        setAlbumsData([]);
+        setArtistsData([]);
+      } finally {
+        setIsLoadingAlbums(false);
+        setIsLoadingArtists(false);
+      }
+    };
+    loadData();
+    
+    // Слушаем событие обновления артистов
+    const handleRefresh = () => {
+      loadArtists();
+    };
+    window.addEventListener('artists:refresh', handleRefresh);
+    return () => {
+      window.removeEventListener('artists:refresh', handleRefresh);
+    };
+  }, []);
+
+  // State for liked tracks count
+  const [likedTracksCount, setLikedTracksCount] = useState(0);
+  
+  // Load liked tracks count
+  useEffect(() => {
+    const loadLikedCount = async () => {
+      try {
+        const response = await apiClient.getLikedTracks();
+        setLikedTracksCount(response?.tracks?.length || 0);
+      } catch (error) {
+        setLikedTracksCount(0);
+      }
+    };
+    loadLikedCount();
+  }, []);
 
   const libraryCategories = [
     {
       icon: Heart,
       title: settings.t('likedSongs'),
-      count: allTracks.length,
+      count: likedTracksCount,
       color: 'linear-gradient(135deg, #A78BFA 0%, #EC4899 50%, #00F5FF 100%)',
-      subtitle: `${allTracks.length} ${settings.t('items')}`,
+      subtitle: `${likedTracksCount} ${settings.t('items')}`,
     },
     {
       icon: ListMusic,
       title: settings.t('playlists'),
-      count: playlists.length,
+      count: playlistsData.length,
       color: 'linear-gradient(135deg, #1ED760 0%, #1DB954 100%)',
-      subtitle: `${playlists.length} ${settings.t('items')}`,
+      subtitle: `${playlistsData.length} ${settings.t('items')}`,
     },
     {
       icon: Music,
       title: settings.t('albums'),
-      count: 34,
+      count: albumsData.length,
       color: 'linear-gradient(135deg, #F59E0B 0%, #EF4444 100%)',
-      subtitle: `34 ${settings.t('items')}`,
+      subtitle: `${albumsData.length} ${settings.t('items')}`,
     },
     {
       icon: TrendingUp,
       title: settings.t('artists'),
-      count: 56,
+      count: artistsData.length,
       color: 'linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%)',
-      subtitle: `56 ${settings.t('items')}`,
+      subtitle: `${artistsData.length} ${settings.t('items')}`,
     },
     {
       icon: Clock,
@@ -336,28 +364,63 @@ export function LibraryView() {
     </section>
   );
 
+  // Load playlists from database
+  useEffect(() => {
+    const loadPlaylists = async () => {
+      try {
+        setIsLoadingPlaylists(true);
+        const playlists = await apiClient.getPlaylists();
+        const formattedPlaylists = playlists.map((playlist: any) => ({
+          id: playlist.id,
+          title: playlist.title,
+          count: playlist._count?.tracks || 0,
+          image: resolveImageUrl(playlist.coverUrl) || '',
+        }));
+        setPlaylistsData(formattedPlaylists);
+      } catch (error) {
+        setPlaylistsData([]);
+      } finally {
+        setIsLoadingPlaylists(false);
+      }
+    };
+    loadPlaylists();
+  }, []);
+
   const renderPlaylists = () => {
-    const handlePlaylistClick = (playlist: { title: string; image: string; count: number }) => {
+    const handlePlaylistClick = (playlist: { id: string; title: string; image: string; count: number }) => {
+      // Убеждаемся, что обложка правильно разрешена
+      const resolvedImage = resolveImageUrl(playlist.image) || playlist.image;
       openPlaylist({ 
+        id: playlist.id,
         title: playlist.title, 
         artist: `${playlist.count} ${playlist.count === 1 ? settings.t('track') : settings.t('tracks')}`, 
-        image: playlist.image,
+        image: resolvedImage,
         type: playlist.title === 'Liked Songs' ? 'liked' : 'playlist',
         returnTo: 'playlists'
       });
     };
 
-    const handlePlaylistPlay = (e: React.MouseEvent, playlist: { title: string; image: string; count: number }) => {
+    const handlePlaylistPlay = async (e: React.MouseEvent, playlist: { id: string; title: string; image: string; count: number }) => {
       e.stopPropagation();
-      const tracks = playlistsData[playlist.title];
-      if (!tracks || tracks.length === 0) return;
       
-      const isCurrentPlaylist = currentTrack?.playlistTitle === playlist.title;
-      
-      if (isCurrentPlaylist && isPlaying) {
-        togglePlay();
+      // Если плейлист не существует, открываем его как плейлист для загрузки треков
+      if (playlist.title === 'Liked Songs') {
+        openPlaylist({
+          title: 'Liked Songs',
+          artist: 'Ваши любимые треки',
+          image: '',
+          type: 'liked',
+        });
       } else {
-        setCurrentTrack(tracks[0], playlist.title);
+        // Убеждаемся, что обложка правильно разрешена
+        const resolvedImage = resolveImageUrl(playlist.image) || playlist.image;
+        openPlaylist({
+          id: playlist.id,
+          title: playlist.title,
+          artist: 'Плейлист',
+          image: resolvedImage,
+          type: 'playlist',
+        });
       }
     };
 
@@ -367,7 +430,16 @@ export function LibraryView() {
           {settings.t('yourPlaylists')}
         </h2>
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3 sm:gap-4">
-          {playlists.map((playlist, index) => {
+          {isLoadingPlaylists ? (
+            <div className="col-span-full flex justify-center items-center py-8">
+              <div className="w-8 h-8 border-4 border-[#1ED760]/20 border-t-[#1ED760] rounded-full animate-spin" />
+            </div>
+          ) : playlistsData.length === 0 ? (
+            <div className="col-span-full text-center text-white/60 py-8">
+              {'Нет плейлистов'}
+            </div>
+          ) : (
+            playlistsData.map((playlist: { id: string; title: string; image: string; count: number }, index: number) => {
             const isCurrentPlaylist = currentTrack?.playlistTitle === playlist.title;
             const isThisPlaying = isCurrentPlaylist && isPlaying;
             const isHovered = hoveredPlaylist === playlist.title;
@@ -406,7 +478,7 @@ export function LibraryView() {
                     </div>
                   ) : (
                     <img
-                      src={playlist.image}
+                      src={resolveImageUrl(playlist.image) || playlist.image}
                       alt={playlist.title}
                       className="w-full h-full object-cover fast-transition gpu-accelerated"
                       style={{
@@ -415,7 +487,8 @@ export function LibraryView() {
                     />
                   )}
                   
-                  {/* Play button on hover */}
+                  {/* Play button on hover - показываем только если плейлист существует или это "Liked Songs" */}
+                  {(playlist.title === 'Liked Songs') && (
                   <motion.div
                     className="absolute bottom-2 right-2"
                     initial={{ opacity: 0, scale: 0, y: 8 }}
@@ -443,6 +516,7 @@ export function LibraryView() {
                       )}
                     </motion.button>
                   </motion.div>
+                  )}
                 </div>
 
                 {/* Playlist info */}
@@ -456,7 +530,8 @@ export function LibraryView() {
                 </div>
               </motion.div>
             );
-          })}
+          })
+          )}
         </div>
       </section>
     );
@@ -542,21 +617,23 @@ export function LibraryView() {
   );
 
   const renderAlbums = () => {
-    const handleAlbumClick = (album: { title: string; artist: string; image: string; year: number }) => {
+    const handleAlbumClick = (album: { title: string; artist: string; image: string; year?: number; id: string; type: 'album' | 'single' }) => {
       // Open album as a playlist
       openPlaylist({ 
         title: album.title, 
-        artist: `${album.year} • ${album.artist}`, 
+        artist: `${album.year ? `${album.year} • ` : ''}${album.artist}`, 
         image: album.image,
-        type: 'playlist',
+        type: album.type,
+        albumId: album.id,
+        albumType: album.type,
         returnTo: 'albums'
       });
     };
 
-    const handleAlbumPlay = (e: React.MouseEvent, album: { title: string; artist: string; image: string; year: number }) => {
+    const handleAlbumPlay = (e: React.MouseEvent, album: { title: string; artist: string; image: string; year?: number; id: string; type: 'album' | 'single' }) => {
       e.stopPropagation();
       // Get random tracks for this album (since we don't have real album data)
-      const tracks = Object.values(playlistsData)[Math.floor(Math.random() * Object.keys(playlistsData).length)];
+      const tracks: any[] = [];
       if (!tracks || tracks.length === 0) return;
       
       setCurrentTrack(tracks[0], album.title);
@@ -568,14 +645,23 @@ export function LibraryView() {
           {settings.t('yourAlbums')}
         </h2>
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3 sm:gap-4">
-          {albumsData.map((album, index) => {
+          {isLoadingAlbums ? (
+            <div className="col-span-full flex justify-center items-center py-8">
+              <div className="w-8 h-8 border-4 border-[#1ED760]/20 border-t-[#1ED760] rounded-full animate-spin" />
+            </div>
+          ) : albumsData.length === 0 ? (
+            <div className="col-span-full text-center text-white/60 py-8">
+              {settings.t('albumsNotFound')}
+            </div>
+          ) : (
+            albumsData.map((album, index) => {
             const isHovered = hoveredPlaylist === album.title;
 
             return (
               <motion.div
                 key={index}
                 {...getMotionProps(index * 0.03)}
-                onClick={() => handleAlbumClick(album)}
+                onClick={() => handleAlbumClick({ ...album, year: album.year || undefined })}
                 onMouseEnter={() => setHoveredPlaylist(album.title)}
                 onMouseLeave={() => setHoveredPlaylist(null)}
                 className="glass-card rounded-xl p-3 sm:p-4 fast-transition hover:scale-105 hover:-translate-y-1 gpu-accelerated cursor-pointer group relative overflow-hidden"
@@ -595,7 +681,7 @@ export function LibraryView() {
                 {/* Square album cover */}
                 <div className="w-full aspect-square rounded-lg overflow-hidden mb-3 relative">
                   <img
-                    src={album.image}
+                    src={resolveImageUrl(album.image) || 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400'}
                     alt={album.title}
                     className="w-full h-full object-cover fast-transition gpu-accelerated"
                     style={{
@@ -615,7 +701,7 @@ export function LibraryView() {
                     transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
                   >
                     <motion.button
-                      onClick={(e) => handleAlbumPlay(e, album)}
+                      onClick={(e) => handleAlbumPlay(e, { ...album, year: album.year || 0 })}
                       className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center"
                       style={{
                         background: '#1ED760',
@@ -637,17 +723,41 @@ export function LibraryView() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      // Находим артиста по имени для получения ID
+                      const artist = artistsData.find(a => a.name === album.artist);
+                      if (artist) {
+                        openArtistView({ id: artist.id, name: album.artist });
+                      } else {
                       openArtistView(album.artist);
+                      }
                       closePlaylist();
                     }}
                     className="text-white opacity-60 hover:opacity-100 hover:underline text-xs truncate text-left w-full"
                   >
-                    {album.year} • {album.artist}
+                    {album.year ? `${album.year} • ` : ''}{album.artist}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openPlaylist({
+                        title: album.title,
+                        artist: `${album.year || ''} • ${album.artist}`,
+                        image: resolveImageUrl(album.image) || '',
+                        type: album.type,
+                        albumId: album.id,
+                        albumType: album.type,
+                      });
+                      closePlaylist();
+                    }}
+                    className="text-white opacity-60 hover:opacity-100 hover:underline text-xs truncate text-left w-full mt-1"
+                  >
+                    {album.type === 'single' ? settings.t('singleType') : settings.t('albumType')}
                   </button>
                 </div>
               </motion.div>
             );
-          })}
+          })
+          )}
         </div>
       </section>
     );
@@ -659,12 +769,21 @@ export function LibraryView() {
         {settings.t('yourArtists')}
       </h2>
       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4 sm:gap-5 md:gap-6">
-        {artistsData.map((artist, index) => (
+        {isLoadingArtists ? (
+          <div className="col-span-full flex justify-center items-center py-8">
+            <div className="w-8 h-8 border-4 border-[#1ED760]/20 border-t-[#1ED760] rounded-full animate-spin" />
+          </div>
+        ) : artistsData.length === 0 ? (
+          <div className="col-span-full text-center text-white/60 py-8">
+            {settings.t('artistsNotFound')}
+          </div>
+        ) : (
+          artistsData.map((artist, index) => (
           <motion.button
             key={index}
             {...getMotionProps(index * 0.03)}
             onClick={() => {
-              openArtistView(artist.name);
+              openArtistView({ id: artist.id, name: artist.name });
               closePlaylist();
             }}
             className="fast-transition hover:scale-105 gpu-accelerated cursor-pointer group"
@@ -672,7 +791,7 @@ export function LibraryView() {
             {/* Circular artist image */}
             <div className="w-full aspect-square rounded-full overflow-hidden mb-3 relative">
               <img
-                src={artist.image}
+                src={resolveImageUrl(artist.image) || 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400'}
                 alt={artist.name}
                 className="w-full h-full object-cover group-hover:scale-110 fast-transition"
               />
@@ -685,7 +804,8 @@ export function LibraryView() {
               </h4>
             </div>
           </motion.button>
-        ))}
+          ))
+        )}
       </div>
     </section>
   );

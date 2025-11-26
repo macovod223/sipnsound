@@ -1,6 +1,6 @@
 import { Play, Pause } from 'lucide-react';
 import { useState } from 'react';
-import { usePlayer, playlistsData } from './PlayerContext';
+import { usePlayer } from './PlayerContext';
 import { useSettings } from './SettingsContext';
 import { MusicVisualizer } from './UI';
 import { motion } from 'motion/react';
@@ -11,35 +11,30 @@ interface PlaylistCardProps {
   image: string;
   index: number;
   size?: 'normal' | 'large';
+  id?: string;
   onHoverChange?: (playlistName: string | null) => void;
 }
 
-export function PlaylistCard({ title, artist, image, index, size = 'normal', onHoverChange }: PlaylistCardProps) {
+export function PlaylistCard({ title, artist, image, index, size = 'normal', id, onHoverChange }: PlaylistCardProps) {
   const [isHovered, setIsHovered] = useState(false);
-  const { setCurrentTrack, togglePlay, currentTrack, isPlaying: globalIsPlaying, openPlaylist } = usePlayer();
+  const { togglePlay, currentTrack, isPlaying: globalIsPlaying, openPlaylist } = usePlayer();
   const { animations } = useSettings();
   const isCurrentTrack = currentTrack?.playlistTitle === title;
   const isPlaying = isCurrentTrack && globalIsPlaying;
 
   const handleCardClick = () => {
-    openPlaylist({ title, artist, image });
+    openPlaylist({ id, title, artist, image, type: 'playlist' });
   };
 
   const handlePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // Get first track from this playlist
-    const tracks = playlistsData[title];
-    if (!tracks || tracks.length === 0) return;
-    
-    const firstTrack = tracks[0];
     const isCurrentPlaylistPlaying = currentTrack?.playlistTitle === title;
     
     if (isCurrentPlaylistPlaying && globalIsPlaying) {
       togglePlay();
     } else {
-      // Play first track from this playlist
-      setCurrentTrack(firstTrack, title);
+      openPlaylist({ id, title, artist, image, type: 'playlist' });
     }
   };
 

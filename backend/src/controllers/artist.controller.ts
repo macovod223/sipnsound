@@ -3,15 +3,28 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../config/database';
+import prisma from '../config/database';
 import { logger } from '../utils/logger';
 import path from 'path';
 import fs from 'fs';
+import { AppError, asyncHandler } from '../middlewares/error.middleware';
 
 // Получить всех артистов
 export const getArtists = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+
     const artists = await prisma.artist.findMany({
+      where: search
+        ? {
+            name: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          }
+        : undefined,
+      take: Number.isFinite(limit) ? limit : undefined,
       select: {
         id: true,
         name: true,
@@ -41,7 +54,7 @@ export const getArtists = async (req: Request, res: Response, next: NextFunction
 };
 
 // Получить артиста по ID
-export const getArtistById = async (req: Request, res: Response, next: NextFunction) => {
+export const getArtistById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const artist = await prisma.artist.findUnique({
@@ -55,6 +68,8 @@ export const getArtistById = async (req: Request, res: Response, next: NextFunct
             playsCount: true,
             coverUrl: true,
             coverPath: true,
+            audioUrl: true,
+            audioPath: true,
           },
           orderBy: {
             playsCount: 'desc',
@@ -83,10 +98,34 @@ export const getArtistById = async (req: Request, res: Response, next: NextFunct
     });
 
     if (!artist) {
-      return res.status(404).json({ message: 'Artist not found' });
+      res.status(404).json({ message: 'Artist not found' });
+      return;
     }
 
-    res.json(artist);
+    const formatTrackMedia = (track: any) => ({
+      ...track,
+      coverUrl: track.coverPath
+        ? `/api/tracks/file/cover/${path.basename(track.coverPath)}`
+        : track.coverUrl,
+      audioUrl: track.audioPath
+        ? `/api/tracks/file/audio/${path.basename(track.audioPath)}`
+        : track.audioUrl,
+    });
+
+    const formatAlbumCover = (album: any) => ({
+      ...album,
+      coverUrl: album.coverPath
+        ? `/api/tracks/file/cover/${path.basename(album.coverPath)}`
+        : album.coverUrl,
+    });
+
+    const formattedArtist = {
+      ...artist,
+      tracks: (artist.tracks ?? []).map(formatTrackMedia),
+      albums: (artist.albums ?? []).map(formatAlbumCover),
+    };
+
+    res.json(formattedArtist);
   } catch (error) {
     logger.error(`Error fetching artist ${req.params.id}:`, error);
     next(error);
@@ -170,14 +209,176 @@ export const getArtistAlbums = async (req: Request, res: Response, next: NextFun
   }
 };
 
-// Создать артиста
-export const createArtist = async (req: Request, res: Response, next: NextFunction) => {
+// Получить все альбомы (для админ-панели)
+export const getAllAlbums = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, bio, verified } = req.body;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const artistId = typeof req.query.artistId === 'string' ? req.query.artistId.trim() : '';
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+
+    const albums = await prisma.album.findMany({
+      where: {
+        ...(search ? {
+          title: {
+            contains: search,
+            mode: 'insensitive',
+          },
+        } : {}),
+        ...(artistId ? { artistId } : {}),
+      },
+      take: Number.isFinite(limit) ? limit : undefined,
+      select: {
+        id: true,
+        title: true,
+        year: true,
+        type: true,
+        coverUrl: true,
+        coverPath: true,
+        artist: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        _count: {
+          select: {
+            tracks: true,
+          },
+        },
+      },
+      orderBy: {
+        year: 'desc',
+      },
+    });
+
+    res.json(albums);
+  } catch (error) {
+    logger.error('Error fetching albums:', error);
+    next(error);
+  }
+};
+
+// Обновить альбом
+export const updateAlbum = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { title, year, type, coverUrl, coverPath } = req.body;
+    const coverFile = req.file;
+
+    const album = await prisma.album.findUnique({
+      where: { id },
+    });
+
+    if (!album) {
+      res.status(404).json({ message: 'Album not found' });
+      return;
+    }
+
+    const updateData: any = {};
+    if (title) updateData.title = title;
+    if (year !== undefined) {
+      const parsedYear = parseInt(String(year), 10);
+      if (!isNaN(parsedYear) && parsedYear >= 1900 && parsedYear <= new Date().getFullYear() + 1) {
+        updateData.year = parsedYear;
+      }
+    }
+    if (type && (type === 'album' || type === 'single')) {
+      updateData.type = type;
+    }
+
+    // Обрабатываем новую обложку
+    if (coverFile) {
+      // Удаляем старую обложку если есть
+      if (album.coverPath) {
+        const oldCoverPath = path.join(__dirname, '../../', album.coverPath);
+        if (fs.existsSync(oldCoverPath)) {
+          fs.unlinkSync(oldCoverPath);
+        }
+      }
+
+      updateData.coverPath = `storage/covers/${coverFile.filename}`;
+      updateData.coverUrl = `/api/tracks/file/cover/${coverFile.filename}`;
+    } else if (coverUrl !== undefined) {
+      updateData.coverUrl = coverUrl ? String(coverUrl).trim() : null;
+    }
+    if (coverPath !== undefined) {
+      updateData.coverPath = coverPath ? String(coverPath).trim() : null;
+    }
+
+    const updatedAlbum = await prisma.album.update({
+      where: { id },
+      data: updateData,
+      include: {
+        artist: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        _count: {
+          select: {
+            tracks: true,
+          },
+        },
+      },
+    });
+
+    logger.info(`Album updated: ${updatedAlbum.title}`);
+    res.json({ message: 'Album updated successfully', album: updatedAlbum });
+  } catch (error) {
+    logger.error(`Error updating album ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+const ARTIST_STORAGE_DIR = path.resolve(__dirname, '../../storage/artists');
+
+// Стриминг изображения артиста
+export const getArtistImage = (req: Request, res: Response) => {
+  const { filename } = req.params;
+  const safeFilename = path.basename(filename);
+  const imagePath = path.resolve(ARTIST_STORAGE_DIR, safeFilename);
+
+  if (!imagePath.startsWith(ARTIST_STORAGE_DIR)) {
+    res.status(400).json({ message: 'Invalid file path' });
+    return;
+  }
+
+  if (!fs.existsSync(imagePath)) {
+    res.status(404).json({ message: 'Image not found' });
+    return;
+  }
+
+  const extension = path.extname(imagePath).toLowerCase();
+  const contentType =
+    extension === '.png'
+      ? 'image/png'
+      : extension === '.webp'
+      ? 'image/webp'
+      : 'image/jpeg';
+  const stream = fs.createReadStream(imagePath);
+
+  res.setHeader('Content-Type', contentType);
+  stream.on('error', (error) => {
+    logger.error('Error streaming artist image:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Failed to stream artist image' });
+    } else {
+      res.end();
+    }
+  });
+  stream.pipe(res);
+};
+
+// Создать артиста
+export const createArtist = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { name, bio, verified, monthlyListeners } = req.body;
     const imageFile = req.file;
 
     if (!name) {
-      return res.status(400).json({ message: 'Artist name is required' });
+      res.status(400).json({ message: 'Artist name is required' });
+      return;
     }
 
     // Проверяем, не существует ли уже артист с таким именем
@@ -186,7 +387,8 @@ export const createArtist = async (req: Request, res: Response, next: NextFuncti
     });
 
     if (existingArtist) {
-      return res.status(400).json({ message: 'Artist with this name already exists' });
+      res.status(400).json({ message: 'Artist with this name already exists' });
+      return;
     }
 
     let imagePath = null;
@@ -197,6 +399,11 @@ export const createArtist = async (req: Request, res: Response, next: NextFuncti
       imageUrl = `/api/artists/image/${path.basename(imageFile.filename)}`;
     }
 
+    const parsedMonthly =
+      monthlyListeners !== undefined && monthlyListeners !== null && monthlyListeners !== ''
+        ? Math.max(0, Math.floor(Number(String(monthlyListeners).replace(/[\s,]/g, ''))) || 0)
+        : 0;
+
     const artist = await prisma.artist.create({
       data: {
         name,
@@ -204,6 +411,7 @@ export const createArtist = async (req: Request, res: Response, next: NextFuncti
         imageUrl,
         imagePath,
         verified: verified === 'true' || verified === true,
+        monthlyListeners: parsedMonthly,
       },
     });
 
@@ -216,10 +424,10 @@ export const createArtist = async (req: Request, res: Response, next: NextFuncti
 };
 
 // Обновить артиста
-export const updateArtist = async (req: Request, res: Response, next: NextFunction) => {
+export const updateArtist = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { name, bio, verified } = req.body;
+    const { name, bio, verified, monthlyListeners } = req.body;
     const imageFile = req.file;
 
     const artist = await prisma.artist.findUnique({
@@ -227,7 +435,8 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
     });
 
     if (!artist) {
-      return res.status(404).json({ message: 'Artist not found' });
+      res.status(404).json({ message: 'Artist not found' });
+      return;
     }
 
     // Проверяем, не существует ли уже другой артист с таким именем
@@ -237,7 +446,8 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
       });
 
       if (existingArtist) {
-        return res.status(400).json({ message: 'Artist with this name already exists' });
+        res.status(400).json({ message: 'Artist with this name already exists' });
+        return;
       }
     }
 
@@ -245,6 +455,10 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
     if (name) updateData.name = name;
     if (bio !== undefined) updateData.bio = bio;
     if (verified !== undefined) updateData.verified = verified === 'true' || verified === true;
+    if (monthlyListeners !== undefined) {
+      const parsedMonthly = Math.max(0, Math.floor(Number(String(monthlyListeners).replace(/[\s,]/g, ''))) || 0);
+      updateData.monthlyListeners = parsedMonthly;
+    }
 
     // Обрабатываем новое изображение
     if (imageFile) {
@@ -274,7 +488,7 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
 };
 
 // Удалить артиста
-export const deleteArtist = async (req: Request, res: Response, next: NextFunction) => {
+export const deleteArtist = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
 
@@ -287,14 +501,16 @@ export const deleteArtist = async (req: Request, res: Response, next: NextFuncti
     });
 
     if (!artist) {
-      return res.status(404).json({ message: 'Artist not found' });
+      res.status(404).json({ message: 'Artist not found' });
+      return;
     }
 
     // Проверяем, есть ли связанные треки или альбомы
     if (artist.tracks.length > 0 || artist.albums.length > 0) {
-      return res.status(400).json({ 
+      res.status(400).json({ 
         message: 'Cannot delete artist with existing tracks or albums. Please delete all tracks and albums first.' 
       });
+      return;
     }
 
     // Удаляем изображение если есть
@@ -317,3 +533,96 @@ export const deleteArtist = async (req: Request, res: Response, next: NextFuncti
     next(error);
   }
 };
+
+// Подписаться на артиста
+export const followArtist = asyncHandler(
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new AppError('User not authenticated', 401);
+    }
+
+    const { id } = req.params;
+
+    const artist = await prisma.artist.findUnique({
+      where: { id },
+    });
+
+    if (!artist) {
+      throw new AppError('Artist not found', 404);
+    }
+
+    // Проверяем, не подписан ли уже
+    const existingFollow = await prisma.following.findUnique({
+      where: {
+        userId_artistId: {
+          userId: req.user.id,
+          artistId: id,
+        },
+      },
+    });
+
+    if (existingFollow) {
+      throw new AppError('Already following this artist', 400);
+    }
+
+    await prisma.following.create({
+      data: {
+        userId: req.user.id,
+        artistId: id,
+      },
+    });
+
+    res.json({ message: 'Successfully followed artist' });
+  }
+);
+
+// Отписаться от артиста
+export const unfollowArtist = asyncHandler(
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new AppError('User not authenticated', 401);
+    }
+
+    const { id } = req.params;
+
+    const artist = await prisma.artist.findUnique({
+      where: { id },
+    });
+
+    if (!artist) {
+      throw new AppError('Artist not found', 404);
+    }
+
+    await prisma.following.deleteMany({
+      where: {
+        userId: req.user.id,
+        artistId: id,
+      },
+    });
+
+    res.json({ message: 'Successfully unfollowed artist' });
+  }
+);
+
+// Проверить, подписан ли пользователь на артиста
+export const checkFollowing = asyncHandler(
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      res.json({ isFollowing: false });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const following = await prisma.following.findUnique({
+      where: {
+        userId_artistId: {
+          userId: req.user.id,
+          artistId: id,
+        },
+      },
+    });
+
+    res.json({ isFollowing: !!following });
+  }
+);

@@ -11,17 +11,17 @@ const prisma = new PrismaClient({
 // Подключение к БД
 prisma.$connect()
   .then(() => {
-    logger.info('✅ Database connected successfully');
+    logger.info('Database connected successfully');
   })
   .catch((error) => {
-    logger.error('❌ Database connection failed:', error);
+    logger.error('Database connection failed:', error);
     process.exit(1);
   });
 
 // Graceful shutdown
 process.on('beforeExit', async () => {
   await prisma.$disconnect();
-  logger.info('🔌 Database disconnected');
+  logger.info('Database disconnected');
 });
 
 export default prisma;

@@ -10,6 +10,7 @@ interface RegisterViewProps {
 
 export function RegisterView({ onSwitchToLogin }: RegisterViewProps) {
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -17,7 +18,7 @@ export function RegisterView({ onSwitchToLogin }: RegisterViewProps) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { register } = useAuth();
+  const { register: registerUser } = useAuth();
   const { animations, t } = useSettings();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -26,42 +27,40 @@ export function RegisterView({ onSwitchToLogin }: RegisterViewProps) {
     setSuccess(false);
 
     // Validation
-    if (username.length < 2) {
-      setError(t('usernameTooShort'));
+    if (username.length < 3) {
+      setError('Имя пользователя должно быть не менее 3 символов');
       return;
     }
 
-    if (password.length < 3) {
-      setError(t('passwordTooShort'));
+    if (!email.includes('@')) {
+      setError('Введите корректный email');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Пароль должен быть не менее 6 символов');
       return;
     }
 
     if (password !== confirmPassword) {
-      setError(t('passwordsDontMatch'));
+      setError('Пароли не совпадают');
       return;
     }
 
     setIsLoading(true);
 
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 800));
+    try {
+      const result = await registerUser(username.trim(), email.trim(), password.trim());
 
-    const registerSuccess = register(username, password);
-    
-    if (!registerSuccess) {
-      setError(t('usernameExists'));
+      if (!result.success) {
+        setError(result.message || 'Ошибка регистрации. Попробуйте другое имя пользователя или email.');
+      } else {
+        setSuccess(true);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Ошибка регистрации. Попробуйте другое имя пользователя или email.');
+    } finally {
       setIsLoading(false);
-    } else {
-      // Show success message
-      setSuccess(true);
-      setIsLoading(false);
-      
-      // Redirect to login after 1.5 seconds
-      setTimeout(() => {
-        if (onSwitchToLogin) {
-          onSwitchToLogin();
-        }
-      }, 1500);
     }
   };
 
@@ -136,7 +135,7 @@ export function RegisterView({ onSwitchToLogin }: RegisterViewProps) {
               } : {})}
             >
               <label htmlFor="username" className="block text-white text-sm mb-2">
-                {t('username')}
+                Имя пользователя
               </label>
               <input
                 id="username"
@@ -144,8 +143,29 @@ export function RegisterView({ onSwitchToLogin }: RegisterViewProps) {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:border-[#1ED760] focus:outline-none fast-transition"
-                placeholder={t('enterUsername')}
+                placeholder="Введите имя пользователя"
                 autoFocus
+                required
+              />
+            </motion.div>
+
+            <motion.div
+              {...(animations ? {
+                initial: { opacity: 0 },
+                animate: { opacity: 1 },
+                transition: { delay: 0.27, duration: 0.3 },
+              } : {})}
+            >
+              <label htmlFor="email" className="block text-white text-sm mb-2">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:border-[#1ED760] focus:outline-none fast-transition"
+                placeholder="Введите email"
                 required
               />
             </motion.div>

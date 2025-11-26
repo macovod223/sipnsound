@@ -49,8 +49,13 @@ backend/storage/lyrics/*
 !backend/storage/lyrics/.gitkeep
 
 # Prisma
-backend/dev.db
-backend/dev.db-journal
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+backend/prisma/migrations/migration_lock.toml
+
+# Old files
+*.old
+*~
 
 # Frontend specific
 .vite/

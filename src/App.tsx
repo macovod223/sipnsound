@@ -26,10 +26,9 @@ import {
 } from "./components/PlayerContext";
 import { SettingsProvider, useSettings } from "./components/SettingsContext";
 import { AuthProvider, useAuth } from "./components/AuthContext";
-import { FullscreenPlayer } from "./components/FullscreenPlayer";
 import { LoginView } from "./components/LoginView";
 import { RegisterView } from "./components/RegisterView";
-import { PlaylistView } from "./components/PlaylistView";
+import { lazy, Suspense } from "react";
 import { LibraryView } from "./components/LibraryView";
 import { SettingsView } from "./components/SettingsView";
 import { ShowAllView } from "./components/ShowAllView";
@@ -38,18 +37,40 @@ import { KeyboardShortcuts } from "./components/KeyboardShortcuts";
 import { SearchView } from "./components/SearchView";
 import { CreatePlaylistView } from "./components/CreatePlaylistView";
 import { ProfileView } from "./components/ProfileView";
-import { AdminPanel } from "./components/AdminPanel";
-import { Toaster } from "./components/ui/sonner";
 
-// Quick access data - now loaded from database
-const quickAccessStatic = [
-  { title: "Liked Songs", image: "", type: "liked" as const },
-  { title: "This Is Yeat", image: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400", type: "playlist" as const },
-  { title: "Travis Scott", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400", type: "artist" as const },
-  { title: "Daily Mix 1", image: "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400", type: "playlist" as const },
-  { title: "Kendrick Lamar", image: "https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400", type: "artist" as const },
-  { title: "Chill Hits", image: "https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400", type: "playlist" as const },
-];
+// Lazy loading для больших компонентов
+const PlaylistView = lazy(() => import("./components/PlaylistView").then(m => ({ default: m.PlaylistView })));
+const AdminPanel = lazy(() => import("./components/AdminPanel").then(m => ({ default: m.AdminPanel })));
+const FullscreenPlayer = lazy(() => import("./components/FullscreenPlayer").then(m => ({ default: m.FullscreenPlayer })));
+
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center min-h-[200px]">
+    <div className="w-8 h-8 border-4 border-[#1ED760]/20 border-t-[#1ED760] rounded-full animate-spin" />
+  </div>
+);
+import { Toaster } from "./components/ui/sonner";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { apiClient } from "./api/client";
+import { resolveImageUrl } from "./utils/media";
+
+// Quick access data - will be loaded from database
+
+type PlaylistCardData = {
+  id: string;
+  title: string;
+  artist: string;
+  image: string;
+};
+
+
+const FALLBACK_PLAYLIST_IMAGE = 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400';
+
+const normalizePlaylistCard = (playlist: { id: string; title: string; description?: string; coverUrl?: string }): PlaylistCardData => ({
+  id: playlist.id,
+  title: playlist.title,
+  artist: playlist.description || 'Sip&Sound Playlist',
+  image: resolveImageUrl(playlist.coverUrl, FALLBACK_PLAYLIST_IMAGE) || FALLBACK_PLAYLIST_IMAGE,
+});
 
 function MainContent() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -77,141 +98,147 @@ function MainContent() {
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   
   // State for playlists from database
-  const [playlists, setPlaylists] = useState<any[]>([]);
+  const [playlists, setPlaylists] = useState<PlaylistCardData[]>([]);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const [playlistReloadKey, setPlaylistReloadKey] = useState(0);
+  
+  // State for quick access items (artists and albums from database)
+  const [quickAccess, setQuickAccess] = useState<Array<{ title: string; image: string; type: 'liked' | 'playlist' | 'artist' | 'album'; id?: string }>>([
+    { title: "Liked Songs", image: "", type: "liked" },
+  ]);
+  const [loadingQuickAccess, setLoadingQuickAccess] = useState(false);
+
+  useEffect(() => {
+    const handleRefresh = () => setPlaylistReloadKey((prev) => prev + 1);
+    window.addEventListener('playlists:refresh', handleRefresh);
+    return () => window.removeEventListener('playlists:refresh', handleRefresh);
+  }, []);
 
   // Load playlists from database
   useEffect(() => {
-    if (isAuthenticated) {
-      setLoadingPlaylists(true);
-      fetch('http://localhost:3001/api/playlists')
-        .then(response => response.json())
-        .then(data => {
-          setPlaylists(data);
-          setLoadingPlaylists(false);
-        })
-        .catch(error => {
-          console.error('Error loading playlists:', error);
-          // Fallback to hardcoded data if API fails
-          const fallbackPlaylists = [
-            {
-              id: '1',
-              title: 'This Is Yeat',
-              description: 'Лучшие треки Yeat',
-              coverUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-              isPublic: true,
-            },
-            {
-              id: '2',
-              title: 'DJ',
-              description: 'DJ миксы и ремиксы',
-              coverUrl: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-              isPublic: true,
-            },
-            {
-              id: '3',
-              title: 'LyfeStyle',
-              description: 'Музыка для образа жизни',
-              coverUrl: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-              isPublic: true,
-            },
-            {
-              id: '4',
-              title: 'Tea Lovers',
-              description: 'Спокойная музыка для чаепития',
-              coverUrl: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400',
-              isPublic: true,
-            },
-            {
-              id: '5',
-              title: 'From Sparta to Padre',
-              description: 'Эпическая музыка',
-              coverUrl: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400',
-              isPublic: true,
-            },
-            {
-              id: '6',
-              title: 'Daily Mix 1',
-              description: 'Travis Scott, A$AP Rocky, Kendrick Lamar and more',
-              coverUrl: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-              isPublic: true,
-            },
-            {
-              id: '7',
-              title: 'Daily Mix 2',
-              description: 'Metro Boomin, Future, 21 Savage and more',
-              coverUrl: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400',
-              isPublic: true,
-            },
-            {
-              id: '8',
-              title: 'Daily Mix 3',
-              description: 'Ken Carson, Yeat, Playboi Carti and more',
-              coverUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-              isPublic: true,
-            },
-            {
-              id: '9',
-              title: 'Daily Mix 4',
-              description: 'Don Toliver, Lil Uzi Vert, Trippie Redd and more',
-              coverUrl: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-              isPublic: true,
-            },
-            {
-              id: '10',
-              title: 'Daily Mix 5',
-              description: 'Toxis, Big Baby Tape, FRIENDLY THUG 52 NG and more',
-              coverUrl: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400',
-              isPublic: true,
-            },
-            {
-              id: '11',
-              title: 'Daily Mix 6',
-              description: 'Skryptonite, MACAN, Basta and more',
-              coverUrl: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=400',
-              isPublic: true,
-            },
-            {
-              id: '12',
-              title: 'Peaceful Piano',
-              description: 'Расслабьтесь и насладитесь красивыми фортепианными композициями',
-              coverUrl: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-              isPublic: true,
-            },
-            {
-              id: '13',
-              title: 'Deep Focus',
-              description: 'Сохраняйте спокойствие и сосредоточенность с эмбиентом и пост-роком',
-              coverUrl: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400',
-              isPublic: true,
-            },
-            {
-              id: '14',
-              title: 'Jazz Vibes',
-              description: 'Оригинальный плейлист с инструментальными чилл-битами',
-              coverUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400',
-              isPublic: true,
-            },
-            {
-              id: '15',
-              title: 'Chill Hits',
-              description: 'Расслабьтесь под лучшие новые и недавние чилл-хиты',
-              coverUrl: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400',
-              isPublic: true,
-            },
-            {
-              id: '16',
-              title: 'All Out 2010s',
-              description: 'Самые популярные песни 2010-х',
-              coverUrl: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400',
-              isPublic: true,
-            },
-          ];
-          setPlaylists(fallbackPlaylists);
-          setLoadingPlaylists(false);
-        });
+    if (!isAuthenticated) {
+      setPlaylists([]);
+      setLoadingPlaylists(false);
+      return;
     }
-  }, [isAuthenticated]);
+
+    let isCancelled = false;
+
+    const loadPlaylists = async () => {
+      setLoadingPlaylists(true);
+      try {
+        const response = await apiClient.getPlaylists();
+        if (isCancelled) {
+          return;
+        }
+
+        const normalized =
+          response.map((playlist) =>
+            normalizePlaylistCard({
+              id: playlist.id,
+              title: playlist.title,
+              description: playlist.description ?? undefined,
+              coverUrl: playlist.coverUrl ?? undefined,
+            })
+          );
+
+        setPlaylists(normalized);
+      } catch (error) {
+        console.error('Error loading playlists:', error);
+        if (!isCancelled) {
+          setPlaylists([]);
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingPlaylists(false);
+        }
+      }
+    };
+
+    loadPlaylists();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isAuthenticated, playlistReloadKey]);
+
+  // Load quick access items (top artists and albums) from database
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setQuickAccess([{ title: "Liked Songs", image: "", type: "liked" }]);
+      setLoadingQuickAccess(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadQuickAccess = async () => {
+      setLoadingQuickAccess(true);
+      try {
+        // Загружаем топ артистов и альбомы
+        const [artistsResponse, albumsResponse] = await Promise.all([
+          apiClient.getArtists({ limit: 3 }),
+          apiClient.getAlbums({ limit: 3 }),
+        ]);
+
+        if (isCancelled) return;
+
+        const quickAccessItems: Array<{ title: string; image: string; type: 'liked' | 'playlist' | 'artist' | 'album'; id?: string }> = [
+          { title: "Liked Songs", image: "", type: "liked" },
+        ];
+
+        // Добавляем топ артистов
+        artistsResponse.slice(0, 2).forEach((artist) => {
+          quickAccessItems.push({
+            title: artist.name,
+            image: resolveImageUrl(artist.imageUrl || artist.imagePath) || '',
+            type: 'artist',
+            id: artist.id,
+          });
+        });
+
+        // Добавляем топ альбомы
+        albumsResponse.slice(0, 3).forEach((album) => {
+          quickAccessItems.push({
+            title: album.title,
+            image: resolveImageUrl(album.coverUrl || album.coverPath) || '',
+            type: 'album',
+            id: album.id,
+          });
+        });
+
+        // Если не хватает до 6 элементов, добавляем плейлисты
+        if (quickAccessItems.length < 6 && playlists.length > 0) {
+          const needed = 6 - quickAccessItems.length;
+          playlists.slice(0, needed).forEach((playlist) => {
+            quickAccessItems.push({
+              title: playlist.title,
+              image: playlist.image,
+              type: 'playlist',
+              id: playlist.id,
+            });
+          });
+        }
+
+        setQuickAccess(quickAccessItems);
+      } catch (error: any) {
+        // Ошибка обрабатывается через toast в apiClient
+        if (!isCancelled) {
+          setQuickAccess([{ title: "Liked Songs", image: "", type: "liked" }]);
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingQuickAccess(false);
+        }
+      }
+    };
+
+    loadQuickAccess();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isAuthenticated, playlists]);
 
   // Show loading while checking auth
   if (isLoading) {
@@ -232,7 +259,6 @@ function MainContent() {
   }
   
   // Playlists with localized descriptions
-  const quickAccess = quickAccessStatic;
   const madeForYou = playlists.slice(0, 6); // First 6 playlists as "Made for You"
   const recommendedPlaylists = playlists.slice(6); // Rest as "Recommended"
 
@@ -329,9 +355,11 @@ function MainContent() {
             {/* Main scrollable content */}
             <div className={`flex-1 flex flex-col min-w-0 overflow-hidden transition-all duration-200 ${selectedPlaylist || activeView !== 'home' || showAllSection || selectedArtist || showCreatePlaylist ? '' : compactView ? 'gap-2 sm:gap-3 md:gap-4' : 'gap-4 sm:gap-5 md:gap-7'}`}>
             {selectedPlaylist ? (
-              <PlaylistView />
+              <Suspense fallback={<LoadingSpinner />}>
+                <PlaylistView />
+              </Suspense>
             ) : selectedArtist ? (
-              <ArtistView onBack={closeArtistView} artistName={selectedArtist} />
+              <ArtistView onBack={closeArtistView} artist={selectedArtist} />
             ) : showCreatePlaylist ? (
               <CreatePlaylistView onBack={() => setShowCreatePlaylist(false)} />
             ) : showAllSection ? (
@@ -347,7 +375,11 @@ function MainContent() {
             ) : activeView === 'profile' ? (
               <ProfileView />
             ) : activeView === 'admin' ? (
-              <AdminPanel />
+              <div className="flex-1 min-h-0 overflow-hidden rounded-3xl">
+                <Suspense fallback={<LoadingSpinner />}>
+                  <AdminPanel />
+                </Suspense>
+              </div>
             ) : (
               <>
               {/* Top bar with greeting and centered search */}
@@ -406,14 +438,20 @@ function MainContent() {
                   <div 
                     className={`grid ${isQueueOpen ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'} ${compactView ? 'gap-1.5 sm:gap-2 md:gap-2 lg:gap-3' : 'gap-2 sm:gap-3 md:gap-4'}`}
                   >
-                    {quickAccess.map((item, index) => (
+                    {loadingQuickAccess ? (
+                      <div className="col-span-full flex justify-center items-center py-8">
+                        <div className="w-8 h-8 border-4 border-[#1ED760]/20 border-t-[#1ED760] rounded-full animate-spin" />
+                      </div>
+                    ) : (
+                      quickAccess.map((item, index) => (
                       <QuickAccessCard
-                        key={index}
+                          key={item.id || item.title || index}
                         {...item}
                         index={index}
                         onHoverChange={setHoveredPlaylist}
                       />
-                    ))}
+                      ))
+                    )}
                   </div>
                 </section>
 
@@ -614,7 +652,9 @@ function MainContent() {
       </div>
 
       {/* Fullscreen Player */}
-      <FullscreenPlayer />
+      <Suspense fallback={null}>
+        <FullscreenPlayer />
+      </Suspense>
       </div>
     </>
   );
@@ -622,13 +662,15 @@ function MainContent() {
 
 export default function App() {
   return (
-    <SettingsProvider>
-      <AuthProvider>
-        <PlayerProvider>
-          <MainContent />
-          <Toaster />
-        </PlayerProvider>
-      </AuthProvider>
-    </SettingsProvider>
+    <ErrorBoundary>
+      <SettingsProvider>
+        <AuthProvider>
+          <PlayerProvider>
+            <MainContent />
+            <Toaster />
+          </PlayerProvider>
+        </AuthProvider>
+      </SettingsProvider>
+    </ErrorBoundary>
   );
 }

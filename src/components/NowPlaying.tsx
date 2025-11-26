@@ -1,5 +1,6 @@
 import { Play, Pause, SkipForward, SkipBack, Volume2, Maximize2, Heart, Repeat, Shuffle } from 'lucide-react';
 import { usePlayer } from './PlayerContext';
+import { formatTime } from '../utils/time';
 
 interface NowPlayingProps {
   onQueueToggle: () => void;
@@ -38,7 +39,6 @@ export function NowPlaying({ onQueueToggle, isQueueOpen }: NowPlayingProps) {
     isPlaying, 
     togglePlay, 
     toggleFullscreen, 
-    dominantColor,
     currentTime,
     duration,
     seek,
@@ -57,12 +57,6 @@ export function NowPlaying({ onQueueToggle, isQueueOpen }: NowPlayingProps) {
   } = usePlayer();
 
   if (!currentTrack) return null;
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   const progress = (currentTime / duration) * 100;
 
@@ -162,7 +156,7 @@ export function NowPlaying({ onQueueToggle, isQueueOpen }: NowPlayingProps) {
               {isPlaying ? (
                 <Pause className="w-5 h-5 text-black fill-black" />
               ) : (
-                <Play className="w-5 h-5 text-black fill-black ml-0.5" />
+                <Play className="w-5 h-5 text-black fill-black ml-0.5" style={{ fill: '#000', color: '#000' }} />
               )}
             </button>
 
@@ -240,13 +234,38 @@ export function NowPlaying({ onQueueToggle, isQueueOpen }: NowPlayingProps) {
             <QueueIcon className="w-4 h-4" />
           </button>
 
-          {/* Volume */}
+          {/* Volume - Spotify style slider */}
           <div className="flex items-center gap-2">
-            <Volume2 className="w-5 h-5" style={{ color: '#b3b3b3' }} />
+            <Volume2 className="w-5 h-5" style={{ color: volume > 0 ? '#ffffff' : '#b3b3b3', transition: 'color 0.2s' }} />
             <div 
               className="w-24 rounded-full h-1 overflow-hidden cursor-pointer group relative"
               style={{ background: '#4d4d4d' }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                const updateVolume = (clientX: number) => {
+                  const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+                  const percentage = (x / rect.width) * 100;
+                  setVolume(Math.max(0, Math.min(100, percentage)));
+                };
+                
+                updateVolume(e.clientX);
+                
+                const handleMouseMove = (moveEvent: MouseEvent) => {
+                  updateVolume(moveEvent.clientX);
+                };
+                
+                const handleMouseUp = () => {
+                  document.removeEventListener('mousemove', handleMouseMove);
+                  document.removeEventListener('mouseup', handleMouseUp);
+                };
+                
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
+              }}
               onClick={(e) => {
+                e.stopPropagation();
                 const rect = e.currentTarget.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const percentage = (x / rect.width) * 100;
@@ -254,16 +273,21 @@ export function NowPlaying({ onQueueToggle, isQueueOpen }: NowPlayingProps) {
               }}
             >
               <div 
-                className="h-full rounded-full relative" 
+                className="h-full rounded-full relative transition-all duration-75 ease-out" 
                 style={{ 
                   width: `${volume}%`,
                   background: '#ffffff',
+                  transition: 'width 0.075s ease-out',
                 }} 
               >
-                {/* Thumb that appears on hover */}
+                {/* Thumb - Spotify style, всегда видим при hover или drag */}
                 <div 
-                  className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white opacity-0 group-hover:opacity-100 instant-transition gpu-accelerated"
-                  style={{ transform: 'translate(50%, -50%) translateZ(0)' }}
+                  className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white transition-opacity duration-75"
+                  style={{ 
+                    opacity: 1,
+                    transform: 'translate(50%, -50%) translateZ(0)',
+                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+                  }}
                 />
               </div>
             </div>

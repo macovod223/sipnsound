@@ -31,7 +31,20 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    strictPort: true, // Не переключаться на другой порт, если 3000 занят
     open: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/storage': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
   // Оптимизация производительности
   optimizeDeps: {

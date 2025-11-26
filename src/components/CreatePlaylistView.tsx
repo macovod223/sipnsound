@@ -1,9 +1,12 @@
 import { motion } from 'motion/react';
-import { ArrowLeft, Plus, Music, Image as ImageIcon, Search, X, Play } from 'lucide-react';
+import { ArrowLeft, Plus, Music, Image as ImageIcon, Search, X } from 'lucide-react';
 import { useSettings } from './SettingsContext';
-import { useState } from 'react';
-import { playlistsData, Track } from './PlayerContext';
+import { useState, useEffect, useRef } from 'react';
+import { Track } from './PlayerContext';
 import { ImageWithFallback } from '@/components/timurgenii/ImageWithFallback';
+import { formatDuration } from '../utils/time';
+import { apiClient } from '../api/client';
+import { toast } from 'sonner';
 
 interface CreatePlaylistViewProps {
   onBack: () => void;
@@ -15,6 +18,9 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
   const [playlistDescription, setPlaylistDescription] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [addedTracks, setAddedTracks] = useState<Track[]>([]);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const coverFileInputRef = useRef<HTMLInputElement>(null);
 
   const getMotionProps = (delay: number = 0) => {
     if (!animations) {
@@ -27,20 +33,29 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
     };
   };
 
-  // Get all available tracks
-  const getAllTracks = (): Track[] => {
-    const allTracks: Track[] = [];
-    Object.values(playlistsData).forEach(tracks => {
-      allTracks.push(...tracks);
-    });
-    // Remove duplicates based on title and artist
-    const uniqueTracks = allTracks.filter((track, index, self) =>
-      index === self.findIndex((t) => t.title === track.title && t.artist === track.artist)
-    );
-    return uniqueTracks;
-  };
+  const [allAvailableTracks, setAllAvailableTracks] = useState<Track[]>([]);
 
-  const allAvailableTracks = getAllTracks();
+  useEffect(() => {
+    const loadTracks = async () => {
+      try {
+        const response = await apiClient.getTracks({ includeAll: true });
+        if (response && response.tracks) {
+          const formattedTracks: Track[] = response.tracks.map((apiTrack: any) => ({
+            id: apiTrack.id,
+            title: apiTrack.title,
+            artist: apiTrack.artist?.name || 'Unknown Artist',
+            image: apiTrack.coverUrl || apiTrack.coverPath || '',
+            genre: apiTrack.genre?.name || 'Unknown',
+            duration: apiTrack.duration,
+          }));
+          setAllAvailableTracks(formattedTracks);
+        }
+      } catch (error) {
+        setAllAvailableTracks([]);
+      }
+    };
+    loadTracks();
+  }, []);
 
   // Filter tracks based on search query
   const filteredTracks = allAvailableTracks.filter(track => {
@@ -51,14 +66,51 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
     );
   });
 
-  const handleCreate = () => {
-    // Here you would create the playlist
-    console.log('Creating playlist:', { 
-      playlistName, 
-      playlistDescription,
-      tracks: addedTracks 
-    });
+  const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setCoverFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setCoverPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!playlistName.trim()) {
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('title', playlistName.trim());
+      if (playlistDescription.trim()) {
+        formData.append('description', playlistDescription.trim());
+      }
+      formData.append('isPublic', 'true');
+      
+      // Добавляем ID треков
+      const trackIds = addedTracks.map(track => track.id).filter(Boolean) as string[];
+      if (trackIds.length > 0) {
+        formData.append('trackIds', JSON.stringify(trackIds));
+      }
+      
+      // Добавляем файл обложки, если выбран
+      if (coverFile) {
+        formData.append('coverFile', coverFile);
+      }
+
+      await apiClient.createPlaylist(formData);
+      
+      // Обновляем список плейлистов
+      window.dispatchEvent(new Event('playlists:refresh'));
+      
     onBack();
+    } catch (error: any) {
+      toast.error(error?.message || 'Не удалось создать плейлист');
+    }
   };
 
   const handleAddTrack = (track: Track) => {
@@ -73,12 +125,6 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
 
   const handleRemoveTrack = (index: number) => {
     setAddedTracks(addedTracks.filter((_, i) => i !== index));
-  };
-
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -135,18 +181,55 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
               </label>
               <div className="flex items-center gap-4">
                 <div 
+                  onClick={() => coverFileInputRef.current?.click()}
                   className="w-32 h-32 sm:w-40 sm:h-40 rounded-xl bg-white/5 flex items-center justify-center cursor-pointer hover:bg-white/10 fast-transition group relative overflow-hidden"
                 >
+                  {coverPreview ? (
+                    <img 
+                      src={coverPreview} 
+                      alt="Cover preview" 
+                      className="w-full h-full object-cover rounded-xl"
+                    />
+                  ) : (
+                    <>
                   <div className="absolute inset-0 bg-gradient-to-br from-[#1ED760]/20 to-transparent opacity-0 group-hover:opacity-100 fast-transition" />
                   <ImageIcon className="w-12 h-12 text-white/40 relative z-10" />
+                    </>
+                  )}
                 </div>
                 <div className="flex-1">
                   <p className="text-white/60 text-sm mb-2">
                     {t('chooseCoverImage')}
                   </p>
-                  <button className="glass px-4 py-2 rounded-lg text-sm text-white hover:bg-white/10 fast-transition">
-                    {t('uploadImage')}
+                  <input
+                    ref={coverFileInputRef}
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.webp"
+                    onChange={handleCoverChange}
+                    className="hidden"
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => coverFileInputRef.current?.click()}
+                    className="glass px-4 py-2 rounded-lg text-sm text-white hover:bg-white/10 fast-transition"
+                  >
+                    {coverFile ? t('changeImage') || 'Изменить изображение' : t('uploadImage')}
                   </button>
+                  {coverFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoverFile(null);
+                        setCoverPreview(null);
+                        if (coverFileInputRef.current) {
+                          coverFileInputRef.current.value = '';
+                        }
+                      }}
+                      className="mt-2 text-xs text-white/60 hover:text-white"
+                    >
+                      {t('removeImage') || 'Удалить изображение'}
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>

@@ -3,15 +3,16 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../config/database';
+import prisma from '../config/database';
 import { logger } from '../utils/logger';
 
-export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
+export const requireAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = (req as any).user?.id;
     
     if (!userId) {
-      return res.status(401).json({ message: 'User not authenticated' });
+      res.status(401).json({ message: 'User not authenticated' });
+      return;
     }
 
     // Проверяем, является ли пользователь админом
@@ -21,13 +22,15 @@ export const requireAdmin = async (req: Request, res: Response, next: NextFuncti
     });
 
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      res.status(404).json({ message: 'User not found' });
+      return;
     }
 
     // Простая проверка - если username содержит 'admin', то это админ
     // В реальном проекте лучше добавить поле isAdmin в схему
     if (!user.username.toLowerCase().includes('admin')) {
-      return res.status(403).json({ message: 'Admin access required' });
+      res.status(403).json({ message: 'Admin access required' });
+      return;
     }
 
     // Добавляем информацию о пользователе в запрос

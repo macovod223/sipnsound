@@ -4,14 +4,17 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import dotenv from 'dotenv';
+import path from 'path';
 import { errorHandler } from './middlewares/error.middleware';
 import { logger } from './utils/logger';
 import authRoutes from './routes/auth.routes';
 import trackRoutes from './routes/track.routes';
+import trackAdminRoutes from './routes/track-admin.routes';
 import playlistRoutes from './routes/playlist.routes';
 import userRoutes from './routes/user.routes';
 import adminRoutes from './routes/admin.routes';
 import artistRoutes from './routes/artist.routes';
+import genreRoutes from './routes/genre.routes';
 
 // Загрузка переменных окружения
 dotenv.config();
@@ -32,22 +35,25 @@ app.use(morgan('combined', { stream: { write: (message) => logger.info(message.t
 
 // Static files (для локального хранения)
 app.use('/uploads', express.static('uploads'));
+app.use('/storage', express.static(path.join(__dirname, '../storage')));
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/tracks', trackRoutes);
+app.use('/api/admin/tracks', trackAdminRoutes);
 app.use('/api/playlists', playlistRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/artists', artistRoutes);
+app.use('/api/genres', genreRoutes);
 
-// 404 handler
-app.use('*', (req, res) => {
+// 404 handler (catch-all для всех необработанных маршрутов)
+app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 

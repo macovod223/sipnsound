@@ -1,30 +1,46 @@
 import { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import { useSettings } from './SettingsContext';
+import { useAuth } from './AuthContext';
 import { apiClient } from '../api/client';
+import { resolveMediaUrl as resolveMediaPath } from '@/utils/media';
 
-interface LyricLine {
+const FALLBACK_TRACK_IMAGE = 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400';
+
+export interface LyricLine {
   time: number;
   text: string;
 }
 
-interface Track {
+export interface Track {
+  id?: string;
   title: string;
   artist: string;
   image: string;
   genre: string;
   duration?: number;
   lyrics?: LyricLine[];
-  playlistTitle?: string; // Add playlist context
+  playlistTitle?: string;
+  audioUrl?: string;
+  lyricsUrl?: string;
+  playsCount?: number;
 }
 
 export interface Playlist {
+  id?: string;
   title: string;
   artist: string;
   image: string;
-  type?: 'liked' | 'playlist';
-  returnTo?: 'playlists' | 'albums' | 'browse'; // Track where to return to
-  returnToArtistTab?: 'tracks' | 'albums' | 'singles'; // Track which artist tab to return to
+  type?: 'liked' | 'playlist' | 'album' | 'single';
+  albumId?: string;
+  albumType?: 'album' | 'single';
+  returnTo?: 'playlists' | 'albums' | 'browse';
+  returnToArtistTab?: 'tracks' | 'albums' | 'singles';
+}
+
+interface SelectedArtist {
+  id?: string;
+  name: string;
 }
 
 interface PlayerContextType {
@@ -39,7 +55,8 @@ interface PlayerContextType {
   duration: number;
   selectedPlaylist: Playlist | null;
   likedTracks: Set<string>;
-  selectedArtist: string | null;
+  likedTracksList: Track[];
+  selectedArtist: SelectedArtist | null;
   libraryReturnCategory: 'browse' | 'playlists' | 'albums' | null;
   artistReturnTab: 'tracks' | 'albums' | 'singles' | null;
   setCurrentTrack: (track: Track, playlistName?: string) => void;
@@ -59,206 +76,73 @@ interface PlayerContextType {
   previousTrack: () => void;
   toggleLike: (trackTitle: string) => void;
   isLiked: (trackTitle: string) => boolean;
-  openArtistView: (artistName: string) => void;
+  openArtistView: (artist: string | SelectedArtist) => void;
   closeArtistView: () => void;
   apiTracks: Track[];
   isLoadingTracks: boolean;
   loadTracksFromAPI: () => void;
+  queue: Track[];
+  addToQueue: (track: Track) => void;
+  removeFromQueue: (index: number) => void;
+  clearQueue: () => void;
+  currentPlaylistTracks: Track[];
+  setCurrentPlaylistTracks: (tracks: Track[]) => void;
+  getNextTrackFromPlaylist: () => Track | null;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
 
-// Mock lyrics data для демонстрации
-const mockLyrics: { [key: string]: LyricLine[] } = {
-  'Daily Mix 1': [
-    { time: 0, text: 'In the silence of the night' },
-    { time: 3.5, text: 'I hear the whispers calling' },
-    { time: 7, text: 'Through the shadows and the light' },
-    { time: 10.5, text: 'Feel the rhythm slowly falling' },
-    { time: 14, text: '' },
-    { time: 15, text: 'Every beat inside my chest' },
-    { time: 18.5, text: 'Reminds me of the moment' },
-    { time: 22, text: 'When we danced until the rest' },
-    { time: 25.5, text: 'Of the world just disappeared' },
-    { time: 29, text: '' },
-    { time: 30, text: 'Take me higher, take me there' },
-    { time: 33.5, text: 'To the place where music lives' },
-    { time: 37, text: 'In the atmosphere we share' },
-    { time: 40.5, text: 'Where the melody just gives' },
-    { time: 44, text: '' },
-    { time: 45, text: 'Lost in sound and lost in you' },
-    { time: 48.5, text: 'Nothing else matters now' },
-    { time: 52, text: 'Every note feels so true' },
-    { time: 55.5, text: 'In this moment, here and now' },
-  ],
-  'Peaceful Piano': [
-    { time: 0, text: 'Gentle keys in morning light' },
-    { time: 4, text: 'Paint the canvas of the day' },
-    { time: 8, text: 'Every note so soft and bright' },
-    { time: 12, text: 'Guides my soul along the way' },
-    { time: 16, text: '' },
-    { time: 18, text: 'In the quiet, I can hear' },
-    { time: 22, text: 'Melodies of peace unfold' },
-    { time: 26, text: 'Every chord so crystal clear' },
-    { time: 30, text: 'Stories waiting to be told' },
-  ],
-  'This Is Yeat': [
-    { time: 0, text: 'Yeah, we taking off' },
-    { time: 2, text: 'No looking back now' },
-    { time: 4, text: 'Living life fast' },
-    { time: 6, text: 'In the moment right now' },
-    { time: 8, text: '' },
-    { time: 9, text: 'Energy so high' },
-    { time: 11, text: 'Reaching for the sky' },
-    { time: 13, text: 'Nothing can stop us' },
-    { time: 15, text: 'Watch us as we fly' },
-  ],
+const coerceNumber = (value: any): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
-// Playlists with their tracks
-export const playlistsData: { [key: string]: Track[] } = {
-  'LyfeStyle': [
-    { title: 'LyfeStyle Track 1', artist: 'Artist 1', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Pop', duration: 205 },
-    { title: 'LyfeStyle Track 2', artist: 'Artist 2', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Pop', duration: 192 },
-    { title: 'LyfeStyle Track 3', artist: 'Artist 3', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Pop', duration: 208 },
-    { title: 'LyfeStyle Track 4', artist: 'Artist 4', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'Pop', duration: 195 },
-    { title: 'LyfeStyle Track 5', artist: 'Artist 5', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Pop', duration: 212 },
-    { title: 'LyfeStyle Track 6', artist: 'Artist 6', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Pop', duration: 198 },
-    { title: 'LyfeStyle Track 7', artist: 'Artist 7', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Pop', duration: 203 },
-    { title: 'LyfeStyle Track 8', artist: 'Artist 8', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Pop', duration: 210 },
-  ],
-  'Liked Songs': [
-    { title: 'Favorite Song 1', artist: 'Popular Artist', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Various', duration: 218 },
-    { title: 'Favorite Song 2', artist: 'Top Artist', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Various', duration: 203 },
-    { title: 'Favorite Song 3', artist: 'Best Artist', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Various', duration: 195 },
-    { title: 'Favorite Song 4', artist: 'Amazing Artist', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'Various', duration: 210 },
-    { title: 'Favorite Song 5', artist: 'Great Artist', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Various', duration: 198 },
-    { title: 'Favorite Song 6', artist: 'Star Artist', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Various', duration: 205 },
-    { title: 'Favorite Song 7', artist: 'Famous Artist', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Various', duration: 213 },
-  ],
-  'This Is Yeat': [
-    { title: 'Sorry Bout That', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 162 },
-    { title: 'Mad bout that', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 148 },
-    { title: 'Poppin', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 135 },
-    { title: 'Talk', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 154 },
-    { title: 'Get Busy', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 165 },
-    { title: 'Money Twerk', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 172 },
-    { title: 'Géëk high', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 158 },
-    { title: 'Turban', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 143 },
-    { title: 'Out thë way', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 152 },
-    { title: 'Up 2 Më', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Hip Hop', duration: 168 },
-  ],
-  'DJ': [
-    { title: 'One More Time', artist: 'Daft Punk', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'House', duration: 320 },
-    { title: 'Around The World', artist: 'Daft Punk', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'House', duration: 429 },
-    { title: 'Levels', artist: 'Avicii', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'EDM', duration: 198 },
-    { title: 'Wake Me Up', artist: 'Avicii', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'EDM', duration: 249 },
-    { title: 'Animals', artist: 'Martin Garrix', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Big Room', duration: 302 },
-    { title: 'Titanium', artist: 'David Guetta ft. Sia', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'EDM', duration: 245 },
-    { title: 'Don\'t You Worry Child', artist: 'Swedish House Mafia', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Progressive House', duration: 403 },
-    { title: 'Clarity', artist: 'Zedd ft. Foxes', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'EDM', duration: 272 },
-    { title: 'Summer', artist: 'Calvin Harris', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'EDM', duration: 223 },
-    { title: 'This Is What You Came For', artist: 'Calvin Harris ft. Rihanna', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'EDM', duration: 222 },
-  ],
-  'Daily Mix 1': [
-    { title: 'SICKO MODE', artist: 'Travis Scott', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Hip Hop', duration: 225 },
-    { title: 'Praise The Lord', artist: 'A$AP Rocky', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Hip Hop', duration: 211 },
-    { title: 'HUMBLE.', artist: 'Kendrick Lamar', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Hip Hop', duration: 177 },
-    { title: 'goosebumps', artist: 'Travis Scott', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Hip Hop', duration: 243 },
-    { title: 'DNA.', artist: 'Kendrick Lamar', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Hip Hop', duration: 185 },
-    { title: 'L$D', artist: 'A$AP Rocky', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Hip Hop', duration: 238 },
-    { title: 'Butterfly Effect', artist: 'Travis Scott', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Hip Hop', duration: 190 },
-    { title: 'ELEMENT.', artist: 'Kendrick Lamar', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Hip Hop', duration: 208 },
-  ],
-  'Daily Mix 2': [
-    { title: 'Superhero', artist: 'Metro Boomin', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Trap', duration: 198 },
-    { title: 'Mask Off', artist: 'Future', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Trap', duration: 204 },
-    { title: 'Bank Account', artist: '21 Savage', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Trap', duration: 220 },
-    { title: 'Life Is Good', artist: 'Future ft. Drake', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Trap', duration: 238 },
-    { title: 'a lot', artist: '21 Savage', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Trap', duration: 288 },
-    { title: 'Creepin', artist: 'Metro Boomin', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Trap', duration: 221 },
-    { title: 'Low Life', artist: 'Future ft. The Weeknd', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Trap', duration: 311 },
-  ],
-  'Daily Mix 3': [
-    { title: 'Yale', artist: 'Ken Carson', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Rage', duration: 210 },
-    { title: 'Sky', artist: 'Playboi Carti', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Rage', duration: 193 },
-    { title: 'Money So Big', artist: 'Yeat', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Rage', duration: 168 },
-    { title: 'M3tamorphosis', artist: 'Playboi Carti', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Rage', duration: 204 },
-    { title: 'Rock N Roll', artist: 'Ken Carson', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Rage', duration: 162 },
-    { title: 'Stop Breathing', artist: 'Playboi Carti', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Rage', duration: 158 },
-    { title: 'Freestyle 2', artist: 'Ken Carson', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Rage', duration: 175 },
-  ],
-  'Peaceful Piano': [
-    { title: 'Moonlight Sonata', artist: 'Classical Piano', image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400', genre: 'Classical', duration: 240 },
-    { title: 'Clair de Lune', artist: 'Piano Masters', image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400', genre: 'Classical', duration: 255 },
-    { title: 'Nocturne', artist: 'Calm Piano', image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400', genre: 'Classical', duration: 228 },
-  ],
-  'Tea Lovers': [
-    { title: 'Lofi Hip Hop Beat 1', artist: 'ChilledCow', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Lofi', duration: 165 },
-    { title: 'Coffee Shop Jazz', artist: 'Jazz Vibes', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Jazz', duration: 192 },
-    { title: 'Rainy Day', artist: 'Lofi Beats', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Lofi', duration: 178 },
-    { title: 'Study Time', artist: 'Focus Music', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'Ambient', duration: 200 },
-    { title: 'Green Tea Dreams', artist: 'Ambient Sounds', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Ambient', duration: 245 },
-    { title: 'Morning Brew', artist: 'Chill Beats', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Lofi', duration: 168 },
-    { title: 'Afternoon Delight', artist: 'Relax Master', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Chill', duration: 215 },
-    { title: 'Evening Meditation', artist: 'Zen Music', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Meditation', duration: 262 },
-  ],
-  'From Sparta to Padre': [
-    { title: 'Epic Journey', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Epic', duration: 248 },
-    { title: 'Victory', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Epic', duration: 235 },
-    { title: 'Heart of Courage', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Epic', duration: 200 },
-    { title: 'Protectors of the Earth', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Epic', duration: 228 },
-    { title: 'To Glory', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'Epic', duration: 215 },
-    { title: 'Archangel', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Epic', duration: 242 },
-    { title: 'Strength of a Thousand Men', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Epic', duration: 195 },
-    { title: 'Star Sky', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400', genre: 'Epic', duration: 268 },
-    { title: 'United We Stand', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400', genre: 'Epic', duration: 222 },
-    { title: 'Black Blade', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'Epic', duration: 255 },
-    { title: 'Immortal', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Epic', duration: 238 },
-    { title: 'Rebirth', artist: 'Two Steps From Hell', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400', genre: 'Epic', duration: 262 },
-  ],
-  'Daily Mix 4': [
-    { title: 'No Idea', artist: 'Don Toliver', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'Hip Hop', duration: 213 },
-    { title: 'XO Tour Llif3', artist: 'Lil Uzi Vert', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'Hip Hop', duration: 183 },
-    { title: 'Dark Knight Dummo', artist: 'Trippie Redd', image: 'https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=400', genre: 'Hip Hop', duration: 178 },
-  ],
-  'Daily Mix 5': [
-    { title: 'Flex', artist: 'Toxis', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Rap', duration: 195 },
-    { title: 'Gimme The Loot', artist: 'Big Baby Tape', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Rap', duration: 202 },
-    { title: 'Slatt', artist: 'FRIENDLY THUG 52 NG', image: 'https://images.unsplash.com/photo-1487180144351-b8472da7d491?w=400', genre: 'Rap', duration: 188 },
-  ],
-  'Daily Mix 6': [
-    { title: 'Положение', artist: 'Skryptonite', image: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=400', genre: 'Rap', duration: 215 },
-    { title: 'Не Ангел', artist: 'MACAN', image: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=400', genre: 'Rap', duration: 198 },
-    { title: 'Сансара', artist: 'Basta', image: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=400', genre: 'Rap', duration: 227 },
-  ],
-  'Deep Focus': [
-    { title: 'Ambient Study', artist: 'Focus Music', image: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=400', genre: 'Ambient', duration: 268 },
-    { title: 'Concentration Flow', artist: 'Study Beats', image: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=400', genre: 'Ambient', duration: 255 },
-    { title: 'Deep Work', artist: 'Productivity Sounds', image: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=400', genre: 'Ambient', duration: 242 },
-  ],
-  'Jazz Vibes': [
-    { title: 'Smooth Jazz', artist: 'Jazz Ensemble', image: 'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=400', genre: 'Jazz', duration: 278 },
-    { title: 'Blue Note', artist: 'Jazz Masters', image: 'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=400', genre: 'Jazz', duration: 265 },
-    { title: 'Night Jazz', artist: 'Cool Jazz', image: 'https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=400', genre: 'Jazz', duration: 248 },
-  ],
-  'Chill Hits': [
-    { title: 'Chill Vibes', artist: 'Modern Pop', image: 'https://images.unsplash.com/photo-1509824227185-9c5a01ceba0d?w=400', genre: 'Pop', duration: 195 },
-    { title: 'Relaxing Pop', artist: 'Pop Artist', image: 'https://images.unsplash.com/photo-1509824227185-9c5a01ceba0d?w=400', genre: 'Pop', duration: 208 },
-    { title: 'Easy Listening', artist: 'Chill Band', image: 'https://images.unsplash.com/photo-1509824227185-9c5a01ceba0d?w=400', genre: 'Pop', duration: 213 },
-  ],
-  'All Out 2010s': [
-    { title: '2010s Hit 1', artist: 'Pop Star', image: 'https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=400', genre: 'Pop', duration: 228 },
-    { title: '2010s Hit 2', artist: 'Chart Topper', image: 'https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=400', genre: 'Pop', duration: 215 },
-    { title: '2010s Hit 3', artist: 'Popular Artist', image: 'https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=400', genre: 'Pop', duration: 205 },
-  ],
+const toLyricLine = (line: any): LyricLine => ({
+  time: coerceNumber(line?.time),
+  text: typeof line?.text === 'string' ? line.text : '',
+});
+
+const normalizeLyricsInput = (raw: any): LyricLine[] => {
+  if (!raw) {
+    return [];
+  }
+
+  let source = raw;
+
+  if (typeof raw === 'string') {
+    try {
+      source = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  if (Array.isArray(source)) {
+    const normalizedLines = (source as any[]).map(toLyricLine);
+    return normalizedLines
+      .filter((line) => line.text.trim().length > 0)
+      .sort((a, b) => a.time - b.time);
+  }
+
+  if (typeof source === 'object' && Array.isArray(source.lines)) {
+    const normalizedLines = (source.lines as any[]).map(toLyricLine);
+    return normalizedLines
+      .filter((line) => line.text.trim().length > 0)
+      .sort((a, b) => a.time - b.time);
+  }
+
+  return [];
 };
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const { t } = useSettings();
+  const { isAuthenticated } = useAuth();
   const [currentTrack, setCurrentTrackState] = useState<Track | null>(null);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
-  const [currentPlaylistName, setCurrentPlaylistName] = useState<string>('LyfeStyle');
+  const [currentPlaylistName, setCurrentPlaylistName] = useState<string>('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [dominantColor, setDominantColor] = useState('#000000');
@@ -267,34 +151,145 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [textShadow, setTextShadow] = useState('none');
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(225); // 3:45 default
-  const [volume, setVolume] = useState(60);
+  const [volume, setVolume] = useState(100);
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState(false);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [likedTracks, setLikedTracks] = useState<Set<string>>(new Set());
-  const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
+  const [likedTracksList, setLikedTracksList] = useState<Track[]>([]);
+  const [selectedArtist, setSelectedArtist] = useState<SelectedArtist | null>(null);
   const [libraryReturnCategory, setLibraryReturnCategory] = useState<'browse' | 'playlists' | 'albums' | null>(null);
   const [artistReturnTab, setArtistReturnTab] = useState<'tracks' | 'albums' | 'singles' | null>(null);
   const [apiTracks, setApiTracks] = useState<Track[]>([]);
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
+  const [queue, setQueue] = useState<Track[]>([]);
+  const [shuffledPlaylist, setShuffledPlaylist] = useState<Track[]>([]);
+  const [shuffledPlaylistIndex, setShuffledPlaylistIndex] = useState(0); // Индекс текущей позиции в перемешанном плейлисте
+  const [currentPlaylistTracks, setCurrentPlaylistTracks] = useState<Track[]>([]);
   
   const timeIntervalRef = useRef<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const lastVolumeToastRef = useRef<number>(60);
+  const lyricsCacheRef = useRef<Map<string, LyricLine[]>>(new Map());
+
+  const repeatRef = useRef(repeat);
+  useEffect(() => {
+    repeatRef.current = repeat;
+  }, [repeat]);
+
+  const nextTrackRef = useRef<() => void>(() => {});
+  const shouldAutoPlayRef = useRef(false);
+
+  useEffect(() => {
+    const audio = new Audio();
+    audioRef.current = audio;
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+    };
+
+    const handleLoadedMetadata = () => {
+      if (!Number.isNaN(audio.duration) && audio.duration > 0) {
+        setDuration(audio.duration);
+      }
+    };
+
+    const handleEnded = () => {
+      if (repeatRef.current && audioRef.current) {
+        audio.currentTime = 0;
+        audio.play().catch(() => setIsPlaying(false));
+      } else {
+        nextTrackRef.current();
+      }
+    };
+
+    const handleError = () => {
+      setIsPlaying(false);
+    };
+
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
+
+    return () => {
+      audio.pause();
+      audio.src = '';
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
+      audioRef.current = null;
+    };
+  }, []);
+
+  // Загрузка лайкнутых треков из API
+  const loadLikedTracks = useCallback(async () => {
+    try {
+      const response = await apiClient.getLikedTracks();
+      if (response && response.tracks && response.tracks.length > 0) {
+        const formattedTracks: Track[] = response.tracks.map((apiTrack: any) => ({
+          id: apiTrack.id,
+          title: apiTrack.title,
+          artist: typeof apiTrack.artist === 'string' ? apiTrack.artist : (apiTrack.artist?.name || 'Unknown Artist'),
+          image:
+            resolveMediaPath(
+              apiTrack.image ||
+                apiTrack.coverUrl ||
+                apiTrack.coverPath ||
+                apiTrack.album?.coverUrl ||
+                apiTrack.album?.coverPath
+            ) || FALLBACK_TRACK_IMAGE,
+          genre: typeof apiTrack.genre === 'string' ? apiTrack.genre : (apiTrack.genre?.name || 'Unknown'),
+          duration: apiTrack.duration,
+          lyrics: normalizeLyricsInput(apiTrack.lyrics),
+          playlistTitle: 'Liked Songs',
+          audioUrl: resolveMediaPath(apiTrack.audioUrl || apiTrack.audioPath),
+          lyricsUrl: undefined,
+          playsCount: apiTrack.playsCount ?? 0,
+          album: typeof apiTrack.album === 'string' ? apiTrack.album : (apiTrack.album?.title || 'Unknown Album'),
+        }));
+        
+        // Обновляем Set лайкнутых треков
+        const likedIds = new Set(formattedTracks.map(t => t.id).filter((id): id is string => Boolean(id)));
+        setLikedTracks(likedIds);
+        
+        // Обновляем список лайкнутых треков (последние первыми)
+        setLikedTracksList(formattedTracks);
+      } else {
+        setLikedTracks(new Set());
+        setLikedTracksList([]);
+      }
+    } catch (error) {
+      console.error('Error loading liked tracks:', error);
+    }
+  }, []);
 
   // Загрузка треков из API
   const loadTracksFromAPI = useCallback(async () => {
     setIsLoadingTracks(true);
     try {
-      const tracks = await apiClient.getTracks();
-      if (tracks && tracks.length > 0) {
-        const formattedTracks: Track[] = tracks.map((apiTrack: any) => ({
+      const response = await apiClient.getTracks({ includeAll: true });
+      if (response && response.tracks && response.tracks.length > 0) {
+        const formattedTracks: Track[] = response.tracks.map((apiTrack: any) => ({
+          id: apiTrack.id,
           title: apiTrack.title,
-          artist: apiTrack.artistName || apiTrack.artist,
-          image: apiTrack.coverUrl || 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400',
-          genre: apiTrack.genre || 'Unknown',
+          artist: apiTrack.artist?.name || 'Unknown Artist',
+          image:
+            resolveMediaPath(
+              apiTrack.coverUrl ||
+                apiTrack.coverPath ||
+                apiTrack.album?.coverUrl ||
+                apiTrack.album?.coverPath
+            ) || FALLBACK_TRACK_IMAGE,
+          genre: apiTrack.genre?.name || 'Unknown',
           duration: apiTrack.duration,
-          lyrics: apiTrack.lyrics || [],
-          playlistTitle: 'API Tracks'
+          lyrics: normalizeLyricsInput(apiTrack.lyrics),
+          playlistTitle: 'API Tracks',
+          audioUrl: resolveMediaPath(apiTrack.audioUrl || apiTrack.audioPath),
+          lyricsUrl: undefined,
+          playsCount: apiTrack.playsCount ?? 0,
+          album: apiTrack.album?.title || 'Unknown Album',
         }));
         setApiTracks(formattedTracks);
       }
@@ -306,33 +301,228 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const patchCurrentTrack = useCallback((trackId: string, patch: Partial<Track>) => {
+    setCurrentTrackState((prev) => {
+      if (!prev || prev.id !== trackId) {
+        return prev;
+      }
+      return { ...prev, ...patch };
+    });
+  }, []);
+
+  const fetchLyricsForTrack = useCallback(async (trackId: string) => {
+    if (lyricsCacheRef.current.has(trackId)) {
+      patchCurrentTrack(trackId, { lyrics: lyricsCacheRef.current.get(trackId) });
+      return;
+    }
+    try {
+      const response = await apiClient.getTrackLyrics(trackId);
+      const parsed = normalizeLyricsInput(response?.lyrics);
+      lyricsCacheRef.current.set(trackId, parsed);
+      patchCurrentTrack(trackId, { lyrics: parsed });
+    } catch (error) {
+    }
+  }, [patchCurrentTrack]);
+
+const resolveTrackImage = (payload: any, fallback?: string) => {
+  const source =
+    payload?.coverUrl ||
+    payload?.coverPath ||
+    payload?.album?.coverUrl ||
+    payload?.album?.coverPath ||
+    payload?.artist?.imageUrl ||
+    payload?.artist?.imagePath;
+  return resolveMediaPath(source) || fallback || FALLBACK_TRACK_IMAGE;
+};
+
+const ensureAudioSource = useCallback(async (track: Track) => {
+  if (track.audioUrl || !track.id) {
+    return;
+  }
+  try {
+    const stream = await apiClient.getTrackStreamUrl(track.id);
+    const resolved = apiClient.getFileUrl(stream.url);
+    patchCurrentTrack(track.id, { audioUrl: resolved });
+  } catch (error) {
+    toast.error('Не удалось загрузить аудио трека');
+    patchCurrentTrack(track.id, { audioUrl: track.audioUrl });
+  }
+}, [patchCurrentTrack]);
+
+const hydrateTrackDetails = useCallback(
+  async (trackId: string, fallback?: Track) => {
+    try {
+      const response = await apiClient.getTrackById(trackId);
+      const apiTrack = response.track as any;
+
+      const normalizedImage = resolveTrackImage(apiTrack, fallback?.image);
+      const normalizedAudio =
+        resolveMediaPath(apiTrack.audioUrl || apiTrack.audioPath) || fallback?.audioUrl;
+      const normalizedLyrics = normalizeLyricsInput(apiTrack.lyrics);
+
+      patchCurrentTrack(trackId, {
+        title: apiTrack.title || fallback?.title,
+        artist: apiTrack.artist?.name || fallback?.artist || 'Unknown Artist',
+        genre: apiTrack.genre?.name || fallback?.genre || 'Music',
+        duration: apiTrack.duration ?? fallback?.duration,
+        image: normalizedImage,
+        audioUrl: normalizedAudio,
+        lyrics: normalizedLyrics.length ? normalizedLyrics : fallback?.lyrics,
+        lyricsUrl: fallback?.lyricsUrl,
+        playsCount: apiTrack.playsCount ?? fallback?.playsCount,
+      });
+
+      if (normalizedLyrics.length) {
+        lyricsCacheRef.current.set(trackId, normalizedLyrics);
+      } else {
+        fetchLyricsForTrack(trackId);
+      }
+    } catch (error) {
+    }
+  },
+  [patchCurrentTrack, fetchLyricsForTrack]
+);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    if (currentTrack?.audioUrl) {
+      // Проверяем, изменился ли трек (новый URL)
+      const isNewTrack = audio.src !== currentTrack.audioUrl;
+      
+      if (isNewTrack) {
+      audio.src = currentTrack.audioUrl;
+      audio.volume = volume / 100;
+        
+        // Сбрасываем время только если установлен флаг автоматического включения (стрелка вправо)
+        if (shouldAutoPlayRef.current) {
+          shouldAutoPlayRef.current = false;
+      audio.currentTime = 0;
+          // Устанавливаем флаг для автоматического включения
+          setIsPlaying(true);
+      }
+        // Play/pause обрабатывается отдельным useEffect
+      }
+      // Volume обрабатывается отдельным useEffect, не обновляем здесь
+    } else {
+      audio.pause();
+      audio.src = '';
+      setCurrentTime(0);
+      if (currentTrack?.duration) {
+        setDuration(currentTrack.duration);
+      }
+    }
+  }, [currentTrack?.audioUrl]); 
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !currentTrack?.audioUrl) {
+      return;
+    }
+    if (isPlaying) {
+      audio
+        .play()
+        .then(() => {
+          if (audio.duration && !Number.isNaN(audio.duration)) {
+            setDuration(audio.duration);
+          }
+        })
+        .catch(() => setIsPlaying(false));
+    } else {
+      audio.pause();
+    }
+  }, [isPlaying, currentTrack?.audioUrl]);
+
+  useEffect(() => {
+    if (audioRef.current && currentTrack?.audioUrl) {
+      audioRef.current.volume = volume / 100;
+    }
+  }, [volume, currentTrack?.audioUrl]);
+
   const setCurrentTrack = (track: Track, playlistName?: string) => {
+    const parsedLyrics = normalizeLyricsInput(track.lyrics);
+    const normalizedLyrics = parsedLyrics.length ? parsedLyrics : [];
+
+    const coverImage =
+      typeof track.image === 'string' && track.image.trim().length
+        ? track.image
+        : FALLBACK_TRACK_IMAGE;
+
     const trackWithLyrics = {
       ...track,
-      lyrics: mockLyrics[track.title] || track.lyrics || [],
+      image: coverImage,
+      lyrics: normalizedLyrics,
       duration: track.duration || 225,
       playlistTitle: playlistName || track.playlistTitle,
     };
+
     setCurrentTrackState(trackWithLyrics);
     
-    // Set playlist context if provided
-    if (playlistName && playlistsData[playlistName]) {
-      setCurrentPlaylistName(playlistName);
-      const index = playlistsData[playlistName].findIndex(t => t.title === track.title);
-      if (index !== -1) {
-        setCurrentTrackIndex(index);
-      }
-    } else if (playlistName === 'API Tracks') {
+    if (playlistName === 'API Tracks') {
       setCurrentPlaylistName('API Tracks');
-      const index = apiTracks.findIndex(t => t.title === track.title);
+      const tracksToSearch = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : apiTracks;
+      const index = tracksToSearch.findIndex(t => t.title === track.title && t.artist === track.artist);
       if (index !== -1) {
         setCurrentTrackIndex(index);
+        // Если shuffle включен, обновляем индекс в перемешанном плейлисте
+        if (shuffle && shuffledPlaylist.length > 0) {
+          setShuffledPlaylistIndex(index);
+        }
+      }
+    } else if (playlistName === 'Liked Songs') {
+      setCurrentPlaylistName('Liked Songs');
+      // Для Liked Songs используем likedTracksList
+      const tracksToSearch = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : (likedTracksList.length > 0 ? likedTracksList : apiTracks);
+      const index = tracksToSearch.findIndex(t => t.title === track.title && t.artist === track.artist);
+      if (index !== -1) {
+        setCurrentTrackIndex(index);
+        // Если shuffle включен, обновляем индекс в перемешанном плейлисте
+        if (shuffle && shuffledPlaylist.length > 0) {
+          setShuffledPlaylistIndex(index);
+        }
+      }
+    } else if (playlistName) {
+      setCurrentPlaylistName(playlistName);
+      // Обновляем индекс для текущего плейлиста
+      if (currentPlaylistTracks.length > 0) {
+        const tracksToSearch = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : currentPlaylistTracks;
+        const index = tracksToSearch.findIndex(t => t.title === track.title && t.artist === track.artist);
+        if (index !== -1) {
+          setCurrentTrackIndex(index);
+          // Если shuffle включен, обновляем индекс в перемешанном плейлисте
+          if (shuffle && shuffledPlaylist.length > 0) {
+            setShuffledPlaylistIndex(index);
+          }
+        } else {
+          setCurrentTrackIndex(0);
+          if (shuffle && shuffledPlaylist.length > 0) {
+            setShuffledPlaylistIndex(0);
+          }
+        }
+      } else {
+        setCurrentTrackIndex(0);
+        if (shuffle && shuffledPlaylist.length > 0) {
+          setShuffledPlaylistIndex(0);
+        }
       }
     }
     
     setCurrentTime(0);
     setDuration(trackWithLyrics.duration || 225);
     setIsPlaying(true);
+
+    if (trackWithLyrics.id) {
+      hydrateTrackDetails(trackWithLyrics.id, trackWithLyrics);
+      if (!trackWithLyrics.audioUrl) {
+        ensureAudioSource(trackWithLyrics);
+      }
+      if (!normalizedLyrics.length) {
+        fetchLyricsForTrack(trackWithLyrics.id);
+      }
+    }
   };
 
   const extractColorFromImage = (_imageUrl: string) => {
@@ -344,52 +534,137 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   };
 
   const nextTrack = useCallback(() => {
-    let currentPlaylistTracks: Track[] = [];
+    // Сначала проверяем очередь
+    if (queue.length > 0) {
+      const nextQueuedTrack = queue[0];
+      setQueue(prev => prev.slice(1));
+      setCurrentTrack(nextQueuedTrack, nextQueuedTrack.playlistTitle || currentPlaylistName);
+      // Запускаем воспроизведение
+      setTimeout(() => {
+        setIsPlaying(true);
+      }, 100);
+      return;
+    }
+    
+    // Определяем текущий плейлист треков
+    let tracksToUse: Track[] = [];
     
     if (currentPlaylistName === 'API Tracks') {
-      currentPlaylistTracks = apiTracks;
+      // Для API Tracks используем shuffle только если включен
+      tracksToUse = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : apiTracks;
+    } else if (currentPlaylistName === 'Liked Songs') {
+      // Для Liked Songs используем shuffle если включен, иначе likedTracksList
+      tracksToUse = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : (likedTracksList.length > 0 ? likedTracksList : apiTracks);
+    } else if (currentPlaylistTracks.length > 0) {
+      // Для обычных плейлистов используем shuffle если включен
+      tracksToUse = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : currentPlaylistTracks;
     } else {
-      currentPlaylistTracks = playlistsData[currentPlaylistName] || [];
+      return; // Нет треков для воспроизведения
     }
     
-    if (currentPlaylistTracks.length === 0) return;
+    if (tracksToUse.length === 0) return;
     
+    // Находим текущий трек в плейлисте
+    let currentIndex: number;
+    
+    if (shuffle && shuffledPlaylist.length > 0) {
+      // Если shuffle включен, ищем в перемешанном плейлисте
+      currentIndex = shuffledPlaylist.findIndex(t => 
+        t.title === currentTrack?.title && t.artist === currentTrack?.artist
+      );
+    } else {
+      // Без shuffle используем индекс из состояния или ищем в оригинальном плейлисте
+      if (currentPlaylistName === 'API Tracks') {
+        currentIndex = currentTrackIndex >= 0 && currentTrackIndex < apiTracks.length 
+          ? currentTrackIndex 
+          : apiTracks.findIndex(t => 
+              t.title === currentTrack?.title && t.artist === currentTrack?.artist
+            );
+      } else if (currentPlaylistName === 'Liked Songs') {
+        const listToSearch = likedTracksList.length > 0 ? likedTracksList : apiTracks;
+        currentIndex = currentTrackIndex >= 0 && currentTrackIndex < listToSearch.length 
+          ? currentTrackIndex 
+          : listToSearch.findIndex(t => 
+              t.title === currentTrack?.title && t.artist === currentTrack?.artist
+            );
+      } else {
+        currentIndex = currentTrackIndex >= 0 && currentTrackIndex < currentPlaylistTracks.length 
+          ? currentTrackIndex 
+          : currentPlaylistTracks.findIndex(t => 
+              t.title === currentTrack?.title && t.artist === currentTrack?.artist
+            );
+      }
+    }
+    
+    if (currentIndex === -1) {
+      // Если трек не найден, начинаем с начала
+      currentIndex = 0;
+    }
+    
+    // Вычисляем следующий трек
+    let nextTrackToPlay: Track;
     let nextIndex: number;
     
-    if (shuffle) {
-      // Random track from current playlist
-      nextIndex = Math.floor(Math.random() * currentPlaylistTracks.length);
+    if (shuffle && shuffledPlaylist.length > 0) {
+      // Если shuffle включен, используем перемешанный плейлист
+      // Увеличиваем индекс в перемешанном плейлисте
+      const newShuffledIndex = (shuffledPlaylistIndex + 1) % shuffledPlaylist.length;
+      setShuffledPlaylistIndex(newShuffledIndex);
+      nextTrackToPlay = shuffledPlaylist[newShuffledIndex];
+      
+      // Обновляем currentTrackIndex для совместимости
+      const originalIndex = tracksToUse.findIndex(t => 
+        t.title === nextTrackToPlay.title && t.artist === nextTrackToPlay.artist
+      );
+      nextIndex = originalIndex >= 0 ? originalIndex : 0;
     } else {
-      // Next track in playlist order
-      nextIndex = (currentTrackIndex + 1) % currentPlaylistTracks.length;
+      // Идем строго по порядку: следующий трек в плейлисте
+      nextIndex = (currentIndex + 1) % tracksToUse.length;
+      nextTrackToPlay = tracksToUse[nextIndex];
     }
     
-    const nextTrack = currentPlaylistTracks[nextIndex];
-    setCurrentTrack(nextTrack, currentPlaylistName);
-  }, [currentTrackIndex, currentPlaylistName, shuffle, apiTracks]);
+    // Обновляем индекс для следующего трека
+    setCurrentTrackIndex(nextIndex);
+    setCurrentTrack(nextTrackToPlay, currentPlaylistName);
+  }, [currentPlaylistName, shuffle, apiTracks, shuffledPlaylist, shuffledPlaylistIndex, queue, currentTrack, currentPlaylistTracks, currentTrackIndex, likedTracksList]);
+
+  useEffect(() => {
+    nextTrackRef.current = nextTrack;
+  }, [nextTrack]);
 
   const previousTrack = useCallback(() => {
-    if (currentTime > 3) {
-      // If track playing more than 3 seconds, restart current track
-      setCurrentTime(0);
-    } else {
-      // Go to previous track in current playlist
       let currentPlaylistTracks: Track[] = [];
       
-      if (currentPlaylistName === 'API Tracks') {
+    if (currentPlaylistName === 'API Tracks' || currentPlaylistName === 'Liked Songs') {
         currentPlaylistTracks = apiTracks;
       } else {
-        currentPlaylistTracks = playlistsData[currentPlaylistName] || [];
+      currentPlaylistTracks = [];
+    }
+    
+    // Если трек играет больше 3 секунд - начинаем сначала
+    if (currentTime > 3) {
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        setCurrentTime(0);
       }
-      
-      if (currentPlaylistTracks.length === 0) return;
-      
+      return;
+    }
+    
+    // Если треков нет или только один - начинаем сначала
+    if (currentPlaylistTracks.length <= 1) {
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        setCurrentTime(0);
+      }
+      return;
+    }
+    
+    // Переключаем на предыдущий трек
       const prevIndex = currentTrackIndex === 0 
         ? currentPlaylistTracks.length - 1 
         : currentTrackIndex - 1;
       const prevTrack = currentPlaylistTracks[prevIndex];
       setCurrentTrack(prevTrack, currentPlaylistName);
-    }
   }, [currentTime, currentTrackIndex, currentPlaylistName, apiTracks]);
 
   useEffect(() => {
@@ -410,13 +685,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // Simulate time progression
   useEffect(() => {
+    if (currentTrack?.audioUrl) {
+      if (timeIntervalRef.current) {
+        clearInterval(timeIntervalRef.current);
+        timeIntervalRef.current = null;
+      }
+      return;
+    }
+
     if (isPlaying) {
       timeIntervalRef.current = window.setInterval(() => {
         setCurrentTime((prev) => {
           if (prev >= duration) {
-            // Track ended
             if (repeat) {
-              return 0; // Restart current track
+              return 0;
             } else {
               setIsPlaying(false);
               return prev;
@@ -425,18 +707,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           return prev + 0.1;
         });
       }, 100);
-    } else {
-      if (timeIntervalRef.current) {
-        clearInterval(timeIntervalRef.current);
-      }
+    } else if (timeIntervalRef.current) {
+      clearInterval(timeIntervalRef.current);
+      timeIntervalRef.current = null;
     }
-    
+
     return () => {
       if (timeIntervalRef.current) {
         clearInterval(timeIntervalRef.current);
+        timeIntervalRef.current = null;
       }
     };
-  }, [isPlaying, duration, repeat]);
+  }, [isPlaying, duration, repeat, currentTrack?.audioUrl]);
 
   const togglePlay = useCallback(() => {
     setIsPlaying(prev => !prev);
@@ -447,12 +729,60 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const seek = useCallback((time: number) => {
-    setCurrentTime(time);
-  }, []);
+    const clamped = Math.max(0, Math.min(time, duration));
+    if (audioRef.current && currentTrack?.audioUrl) {
+      audioRef.current.currentTime = clamped;
+    }
+    setCurrentTime(clamped);
+  }, [duration, currentTrack?.audioUrl]);
 
   const toggleShuffle = useCallback(() => {
-    setShuffle(prev => !prev);
-  }, []);
+    setShuffle(prev => {
+      const newShuffle = !prev;
+      // При включении shuffle создаем перемешанную версию плейлиста
+      if (newShuffle) {
+        let tracksToShuffle: Track[] = [];
+        if (currentPlaylistName === 'API Tracks') {
+          tracksToShuffle = [...apiTracks];
+        } else if (currentPlaylistName === 'Liked Songs') {
+          tracksToShuffle = likedTracksList.length > 0 ? [...likedTracksList] : [...apiTracks];
+        } else if (currentPlaylistTracks.length > 0) {
+          tracksToShuffle = [...currentPlaylistTracks];
+        }
+        if (tracksToShuffle.length > 0) {
+          // Исключаем текущий трек из перемешивания
+          const currentTrackIndex = tracksToShuffle.findIndex(t => 
+            t.title === currentTrack?.title && t.artist === currentTrack?.artist
+          );
+          const otherTracks = currentTrackIndex >= 0 
+            ? [...tracksToShuffle.slice(0, currentTrackIndex), ...tracksToShuffle.slice(currentTrackIndex + 1)]
+            : [...tracksToShuffle];
+          
+          // Fisher-Yates shuffle для остальных треков с использованием crypto для лучшей случайности
+          for (let i = otherTracks.length - 1; i > 0; i--) {
+            // Используем crypto.getRandomValues для более случайного выбора
+            const randomArray = new Uint32Array(1);
+            crypto.getRandomValues(randomArray);
+            const j = Math.floor((randomArray[0] / (0xFFFFFFFF + 1)) * (i + 1));
+            [otherTracks[i], otherTracks[j]] = [otherTracks[j], otherTracks[i]];
+          }
+          
+          // Вставляем текущий трек в начало, затем остальные
+          const shuffled = currentTrackIndex >= 0 
+            ? [tracksToShuffle[currentTrackIndex], ...otherTracks]
+            : otherTracks;
+          
+          setShuffledPlaylist(shuffled);
+          setShuffledPlaylistIndex(0); // Начинаем с текущего трека
+        }
+      } else {
+        // При выключении shuffle очищаем перемешанный плейлист
+        setShuffledPlaylist([]);
+        setShuffledPlaylistIndex(0);
+      }
+      return newShuffle;
+    });
+  }, [apiTracks, currentPlaylistName, currentPlaylistTracks, likedTracksList, currentTrack]);
 
   const toggleRepeat = useCallback(() => {
     setRepeat(prev => !prev);
@@ -475,24 +805,78 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // Keep libraryReturnCategory and artistReturnTab so views can use them
   }, []);
 
-  const toggleLike = useCallback((trackTitle: string) => {
+  const toggleLike = useCallback(async (trackIdOrTitle: string) => {
+    // Сначала пытаемся найти трек по ID
+    let trackToLike = currentTrack || 
+      likedTracksList.find(t => t.id === trackIdOrTitle) ||
+      apiTracks.find(t => t.id === trackIdOrTitle);
+
+    // Если не нашли по ID, ищем по названию (для обратной совместимости)
+    if (!trackToLike) {
+      trackToLike = likedTracksList.find(t => t.title === trackIdOrTitle) ||
+        apiTracks.find(t => t.title === trackIdOrTitle);
+    }
+
+    // Если трек не найден или нет ID, не можем лайкнуть через API
+    if (!trackToLike || !trackToLike.id) {
+      toast.error('ID трека не найден');
+      return;
+    }
+
+    const trackId = trackToLike.id;
+    const isCurrentlyLiked = likedTracks.has(trackId);
+
+    try {
+      if (isCurrentlyLiked) {
+        // Удаляем лайк
+        await apiClient.unlikeTrack(trackId);
     setLikedTracks((prev) => {
       const newSet = new Set(prev);
-      if (newSet.has(trackTitle)) {
-        newSet.delete(trackTitle);
+          newSet.delete(trackId);
+          return newSet;
+        });
+        setLikedTracksList((prevList) => prevList.filter(t => t.id !== trackId));
+        toast.success(t('trackRemoved') || 'Removed from Liked Songs');
       } else {
-        newSet.add(trackTitle);
-      }
+        // Добавляем лайк
+        await apiClient.likeTrack(trackId);
+        setLikedTracks((prev) => {
+          const newSet = new Set(prev);
+          newSet.add(trackId);
       return newSet;
     });
-  }, []);
+        setLikedTracksList((prevList) => {
+          const existingIndex = prevList.findIndex(t => t.id === trackId);
+          if (existingIndex !== -1) {
+            const newList = [...prevList];
+            const [existingTrack] = newList.splice(existingIndex, 1);
+            return [existingTrack, ...newList];
+          }
+          return [{ ...trackToLike }, ...prevList];
+        });
+        toast.success(t('trackAdded') || 'Added to Liked Songs');
+      }
+    } catch (error) {
+      toast.error('Не удалось обновить статус лайка');
+    }
+  }, [currentTrack, likedTracks, likedTracksList, apiTracks, t, loadLikedTracks]);
 
-  const isLiked = useCallback((trackTitle: string) => {
-    return likedTracks.has(trackTitle);
-  }, [likedTracks]);
+  const isLiked = useCallback((trackIdOrTitle: string) => {
+    // Сначала проверяем по ID
+    if (likedTracks.has(trackIdOrTitle)) {
+      return true;
+    }
+    // Если не нашли по ID, проверяем по названию (для обратной совместимости)
+    const track = likedTracksList.find(t => t.id === trackIdOrTitle || t.title === trackIdOrTitle);
+    return track && track.id ? likedTracks.has(track.id) : false;
+  }, [likedTracks, likedTracksList]);
 
-  const openArtistView = useCallback((artistName: string) => {
-    setSelectedArtist(artistName);
+  const openArtistView = useCallback((artist: string | SelectedArtist) => {
+    if (typeof artist === 'string') {
+      setSelectedArtist({ name: artist });
+    } else {
+      setSelectedArtist(artist);
+    }
   }, []);
 
   const closeArtistView = useCallback(() => {
@@ -507,6 +891,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Handle arrow keys separately (they don't work with toLowerCase)
+      if (e.key === 'ArrowRight') {
+          e.preventDefault();
+        // Устанавливаем флаг для автоматического включения
+        shouldAutoPlayRef.current = true;
+        // Переключаем трек
+          nextTrack();
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          previousTrack();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (volume < 100) {
+            const newVolumeUp = Math.min(100, volume + 5);
+            setVolume(newVolumeUp);
+            if (Math.abs(newVolumeUp - lastVolumeToastRef.current) >= 10 || newVolumeUp === 100) {
+              toast.success(`Volume: ${newVolumeUp}%`, { duration: 800 });
+              lastVolumeToastRef.current = newVolumeUp;
+            }
+          }
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (volume > 0) {
+            const newVolumeDown = Math.max(0, volume - 5);
+            setVolume(newVolumeDown);
+            if (Math.abs(newVolumeDown - lastVolumeToastRef.current) >= 10 || newVolumeDown === 0) {
+              toast.success(`Volume: ${newVolumeDown}%`, { duration: 800 });
+              lastVolumeToastRef.current = newVolumeDown;
+            }
+          }
+        return;
+      }
+
       switch (e.key.toLowerCase()) {
         case ' ':
         case 'k':
@@ -514,46 +937,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           // Space or K - Play/Pause
           e.preventDefault();
           togglePlay();
-          break;
-        case 'arrowright':
-        case 'в': // Russian layout: Right arrow alternative (В)
-          // Right arrow - Next track
-          e.preventDefault();
-          nextTrack();
-          break;
-        case 'arrowleft':
-        case 'а': // Russian layout: Left arrow alternative (А)
-          // Left arrow - Previous track
-          e.preventDefault();
-          previousTrack();
-          break;
-        case 'arrowup':
-        case 'ц': // Russian layout: Up arrow alternative (Ц)
-          // Up arrow - Volume up
-          e.preventDefault();
-          if (volume < 100) {
-            const newVolumeUp = Math.min(100, volume + 5);
-            setVolume(newVolumeUp);
-            // Only show toast if volume changed significantly (every 10%)
-            if (Math.abs(newVolumeUp - lastVolumeToastRef.current) >= 10 || newVolumeUp === 100) {
-              toast.success(`Volume: ${newVolumeUp}%`, { duration: 800 });
-              lastVolumeToastRef.current = newVolumeUp;
-            }
-          }
-          break;
-        case 'arrowdown':
-        case 'н': // Russian layout: Down arrow alternative (Н)
-          // Down arrow - Volume down
-          e.preventDefault();
-          if (volume > 0) {
-            const newVolumeDown = Math.max(0, volume - 5);
-            setVolume(newVolumeDown);
-            // Only show toast if volume changed significantly (every 10%)
-            if (Math.abs(newVolumeDown - lastVolumeToastRef.current) >= 10 || newVolumeDown === 0) {
-              toast.success(`Volume: ${newVolumeDown}%`, { duration: 800 });
-              lastVolumeToastRef.current = newVolumeDown;
-            }
-          }
           break;
         case 'f':
         case 'а': // Russian layout: F -> А
@@ -574,11 +957,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         case 'l':
         case 'д': // Russian layout: L -> Д
           // L - Like current track
-          if (currentTrack) {
+          if (currentTrack && currentTrack.id) {
             e.preventDefault();
-            const wasLiked = isLiked(currentTrack.title);
-            toggleLike(currentTrack.title);
-            toast.success(wasLiked ? t('trackRemoved') : t('trackAdded'), { duration: 1500 });
+            toggleLike(currentTrack.id);
+            // Toast уже показывается внутри toggleLike, не нужно дублировать
           }
           break;
         case 's':
@@ -621,6 +1003,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     duration,
     selectedPlaylist,
     likedTracks,
+    likedTracksList,
     selectedArtist,
     libraryReturnCategory,
     artistReturnTab,
@@ -646,12 +1029,81 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     apiTracks,
     isLoadingTracks,
     loadTracksFromAPI,
+    queue,
+    addToQueue: (track: Track) => {
+      setQueue(prev => [...prev, track]);
+    },
+    removeFromQueue: (index: number) => {
+      setQueue(prev => prev.filter((_, i) => i !== index));
+    },
+    clearQueue: () => {
+      setQueue([]);
+    },
+    currentPlaylistTracks,
+    setCurrentPlaylistTracks,
+    getNextTrackFromPlaylist: () => {
+      // Сначала проверяем очередь
+      if (queue.length > 0) {
+        return queue[0];
+      }
+      
+      // Определяем текущий плейлист треков
+      let tracksToUse: Track[] = [];
+      
+      if (currentPlaylistName === 'API Tracks') {
+        tracksToUse = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : apiTracks;
+      } else if (currentPlaylistName === 'Liked Songs') {
+        tracksToUse = likedTracksList.length > 0 ? likedTracksList : apiTracks;
+      } else if (currentPlaylistTracks.length > 0) {
+        tracksToUse = currentPlaylistTracks;
+      } else {
+        return null;
+      }
+      
+      if (tracksToUse.length === 0) return null;
+      
+      if (shuffle && shuffledPlaylist.length > 0) {
+        // Если shuffle включен, используем индекс в перемешанном плейлисте
+        const nextShuffledIndex = (shuffledPlaylistIndex + 1) % shuffledPlaylist.length;
+        return shuffledPlaylist[nextShuffledIndex] || null;
+      } else {
+        // Без shuffle используем индекс из состояния или ищем в оригинальном плейлисте
+        let currentIndex: number;
+        if (currentPlaylistName === 'API Tracks') {
+          currentIndex = currentTrackIndex >= 0 && currentTrackIndex < apiTracks.length 
+            ? currentTrackIndex 
+            : apiTracks.findIndex(t => 
+                t.title === currentTrack?.title && t.artist === currentTrack?.artist
+              );
+        } else if (currentPlaylistName === 'Liked Songs') {
+          const listToSearch = likedTracksList.length > 0 ? likedTracksList : apiTracks;
+          currentIndex = currentTrackIndex >= 0 && currentTrackIndex < listToSearch.length 
+            ? currentTrackIndex 
+            : listToSearch.findIndex(t => 
+                t.title === currentTrack?.title && t.artist === currentTrack?.artist
+              );
+        } else {
+          currentIndex = currentTrackIndex >= 0 && currentTrackIndex < currentPlaylistTracks.length 
+            ? currentTrackIndex 
+            : currentPlaylistTracks.findIndex(t => 
+                t.title === currentTrack?.title && t.artist === currentTrack?.artist
+              );
+        }
+        
+        if (currentIndex === -1) return null;
+        
+        // Идем строго по порядку
+        const nextIndex = (currentIndex + 1) % tracksToUse.length;
+        return tracksToUse[nextIndex] || null;
+      }
+    },
   };
 
   // Загружаем треки из API при инициализации
   useEffect(() => {
     loadTracksFromAPI();
-  }, [loadTracksFromAPI]);
+    loadLikedTracks();
+  }, [loadTracksFromAPI, loadLikedTracks]);
 
   return (
     <PlayerContext.Provider value={contextValue}>

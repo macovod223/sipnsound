@@ -30,10 +30,10 @@ export function LoginView({ onSwitchToRegister }: LoginViewProps) {
     setIsLoading(true);
 
     try {
-      const success = login(username.trim(), password.trim(), rememberMe);
+      const result = await login(username.trim(), password.trim(), rememberMe);
       
-      if (!success) {
-        setError('Invalid username or password');
+      if (!result.success) {
+        setError(result.message || 'Invalid username or password');
       }
     } catch (err) {
       setError('Login failed. Please try again.');

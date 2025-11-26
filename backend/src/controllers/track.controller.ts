@@ -1,16 +1,18 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import { Prisma } from '@prisma/client';
 import prisma from '../config/database';
 import { AppError, asyncHandler } from '../middlewares/error.middleware';
 import { parseLrcFile } from '../utils/lrc-parser';
 
 // GET /api/tracks
 export const getTracks = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response) => {
     const { 
-      genre, 
-      artist, 
+      genreId,
+      artistId,
+      albumId,
       search,
       page = '1', 
       limit = '20',
@@ -22,63 +24,150 @@ export const getTracks = asyncHandler(
     const limitNum = parseInt(limit as string, 10);
     const skip = (pageNum - 1) * limitNum;
 
+    // Валидация параметра order
+    const validOrder = order === 'asc' || order === 'desc' ? order : 'desc';
+
     // Построение фильтров
-    const where: any = {};
+    const includeAll = req.query.includeAll === 'true' && req.user?.username?.toLowerCase().includes('admin');
+
+    const baseWhere: Prisma.TrackWhereInput = {};
     
-    if (genre) {
-      where.genre = genre;
+    if (!includeAll) {
+      baseWhere.isPublished = true;
     }
     
-    if (artist) {
-      where.artistName = { contains: artist as string, mode: 'insensitive' };
+    if (genreId && typeof genreId === 'string') {
+      baseWhere.genreId = genreId;
     }
     
-    if (search) {
-      where.OR = [
-        { title: { contains: search as string, mode: 'insensitive' } },
-        { artistName: { contains: search as string, mode: 'insensitive' } },
-        { albumName: { contains: search as string, mode: 'insensitive' } },
-      ];
+    if (artistId && typeof artistId === 'string') {
+      baseWhere.artistId = artistId;
     }
 
-    // Получение треков
+    if (albumId && typeof albumId === 'string') {
+      baseWhere.albumId = albumId;
+    }
+    
+    const where: Prisma.TrackWhereInput = search
+      ? {
+          ...baseWhere,
+          OR: [
+        { title: { contains: search as string, mode: 'insensitive' } },
+        { artist: { name: { contains: search as string, mode: 'insensitive' } } },
+        { album: { is: { title: { contains: search as string, mode: 'insensitive' } } } },
+          ],
+    }
+      : baseWhere;
+
+    // Получение треков с связями
     const [tracks, total] = await Promise.all([
       prisma.track.findMany({
         where,
         skip,
         take: limitNum,
-        orderBy: { [sortBy as string]: order },
+        orderBy: { [sortBy as string]: validOrder },
+        include: {
+          artist: {
+            select: {
+              id: true,
+              name: true,
+              imageUrl: true,
+              verified: true,
+            },
+          },
+          album: {
         select: {
           id: true,
           title: true,
-          artistName: true,
-          albumName: true,
-          genre: true,
-          duration: true,
+              year: true,
           coverUrl: true,
-          coverPath: true,
-          playsCount: true,
-          createdAt: true,
+            },
+          },
+          genre: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+            },
+          },
         },
       }),
       prisma.track.count({ where }),
     ]);
 
-    // Формируем URL для обложек
-    const tracksWithCovers = tracks.map(track => ({
+    let resultTracks = tracks;
+    let resultTotal = total;
+
+    if (search && resultTracks.length === 0) {
+      const normalizedSearch = (search as string).trim().toLocaleLowerCase('ru-RU');
+      if (normalizedSearch) {
+        // Prisma/ILIKE не умеет сравнивать кириллицу без учёта регистра в текущей локали,
+        // поэтому выполняем fallback: загружаем опубликованные треки и фильтруем вручную.
+        const fallbackTracks = await prisma.track.findMany({
+          where: baseWhere,
+          orderBy: { [sortBy as string]: validOrder },
+          include: {
+            artist: {
+              select: {
+                id: true,
+                name: true,
+                imageUrl: true,
+                verified: true,
+              },
+            },
+            album: {
+              select: {
+                id: true,
+                title: true,
+                year: true,
+                coverUrl: true,
+              },
+            },
+            genre: {
+              select: {
+                id: true,
+                name: true,
+                color: true,
+              },
+            },
+          },
+        });
+
+        const filteredTracks = fallbackTracks.filter((track: any) => {
+          const fieldsToCheck = [
+            track.title,
+            track.artist?.name,
+            track.album?.title,
+          ]
+            .filter(Boolean)
+            .map(value => value.toString().toLocaleLowerCase('ru-RU'));
+
+          return fieldsToCheck.some(text => text.includes(normalizedSearch));
+        });
+
+        resultTotal = filteredTracks.length;
+        resultTracks = filteredTracks.slice(skip, skip + limitNum);
+      }
+    }
+
+    // Формируем URL для обложек и аудио
+    const tracksWithMedia = resultTracks.map((track: any) => ({
       ...track,
       coverUrl: track.coverPath 
         ? `/api/tracks/file/cover/${path.basename(track.coverPath)}`
         : track.coverUrl,
+      audioUrl: track.audioPath
+        ? `/api/tracks/file/audio/${path.basename(track.audioPath)}`
+        : track.audioUrl,
     }));
 
     res.json({
-      tracks: tracksWithCovers,
+      tracks: tracksWithMedia,
       pagination: {
         page: pageNum,
         limit: limitNum,
-        total,
-        pages: Math.ceil(total / limitNum),
+        total: resultTotal,
+        pages: Math.ceil(resultTotal / limitNum),
       },
     });
   }
@@ -86,12 +175,35 @@ export const getTracks = asyncHandler(
 
 // GET /api/tracks/:id
 export const getTrackById = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const track = await prisma.track.findUnique({
       where: { id },
       include: {
+        artist: {
+          select: {
+            id: true,
+            name: true,
+            imageUrl: true,
+            verified: true,
+          },
+        },
+        album: {
+          select: {
+            id: true,
+            title: true,
+            year: true,
+            coverUrl: true,
+          },
+        },
+        genre: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+          },
+        },
         uploadedBy: {
           select: {
             id: true,
@@ -138,7 +250,7 @@ export const getTrackById = asyncHandler(
 
 // GET /api/tracks/:id/stream
 export const streamTrack = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const track = await prisma.track.findUnique({
@@ -146,9 +258,13 @@ export const streamTrack = asyncHandler(
       select: {
         id: true,
         title: true,
-        artistName: true,
         audioUrl: true,
         audioPath: true,
+        artist: {
+          select: {
+            name: true,
+          },
+        },
       },
     });
 
@@ -175,18 +291,18 @@ export const streamTrack = asyncHandler(
     // Если есть локальный файл - возвращаем путь к нему
     if (track.audioPath) {
       const audioUrl = `/api/tracks/file/audio/${path.basename(track.audioPath)}`;
-      res.json({
+      return res.json({
         url: audioUrl,
         title: track.title,
-        artist: track.artistName,
+        artist: track.artist.name,
         isLocal: true,
       });
     } else {
       // Иначе возвращаем внешний URL
-      res.json({
+      return res.json({
         url: track.audioUrl,
         title: track.title,
-        artist: track.artistName,
+        artist: track.artist.name,
         isLocal: false,
       });
     }
@@ -195,7 +311,7 @@ export const streamTrack = asyncHandler(
 
 // GET /api/tracks/:id/lyrics
 export const getTrackLyrics = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const track = await prisma.track.findUnique({
@@ -203,9 +319,13 @@ export const getTrackLyrics = asyncHandler(
       select: {
         id: true,
         title: true,
-        artistName: true,
         lyrics: true,
         lyricsPath: true,
+        artist: {
+          select: {
+            name: true,
+          },
+        },
       },
     });
 
@@ -238,7 +358,7 @@ export const getTrackLyrics = asyncHandler(
 
         await prisma.track.update({
           where: { id },
-          data: { lyrics: lyricsJson },
+          data: { lyrics: JSON.parse(JSON.stringify(lyricsJson)) },
         });
 
         return res.json({
@@ -249,16 +369,82 @@ export const getTrackLyrics = asyncHandler(
     }
 
     // Lyrics не найдены
-    res.json({
+    return res.json({
       lyrics: null,
       message: 'Lyrics not available for this track',
     });
   }
 );
 
+// POST /api/tracks/:id/like
+export const likeTrack = asyncHandler(
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new AppError('User not authenticated', 401);
+    }
+
+    const { id } = req.params;
+
+    const track = await prisma.track.findUnique({
+      where: { id },
+    });
+
+    if (!track) {
+      throw new AppError('Track not found', 404);
+    }
+
+    // Проверяем, не лайкнут ли уже трек
+    const existingLike = await prisma.likedTrack.findUnique({
+      where: {
+        userId_trackId: {
+          userId: req.user.id,
+          trackId: id,
+        },
+      },
+    });
+
+    if (existingLike) {
+      // Если уже лайкнут, возвращаем успех
+      res.json({ message: 'Track already liked', isLiked: true });
+      return;
+    }
+
+    // Добавляем лайк
+    await prisma.likedTrack.create({
+      data: {
+        userId: req.user.id,
+        trackId: id,
+      },
+    });
+
+    res.json({ message: 'Track liked successfully', isLiked: true });
+  }
+);
+
+// DELETE /api/tracks/:id/like
+export const unlikeTrack = asyncHandler(
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new AppError('User not authenticated', 401);
+    }
+
+    const { id } = req.params;
+
+    // Удаляем лайк
+    await prisma.likedTrack.deleteMany({
+      where: {
+        userId: req.user.id,
+        trackId: id,
+      },
+    });
+
+    res.json({ message: 'Track unliked successfully', isLiked: false });
+  }
+);
+
 // GET /api/tracks/file/:type/:filename
 export const streamLocalFile = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response) => {
     const { type, filename } = req.params;
 
     // Определяем папку в зависимости от типа
