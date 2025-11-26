@@ -343,9 +343,40 @@ export function AdminPanel() {
         formData.append('genreName', trackData.genreName.trim());
       }
       if (trackData.playsCount.trim()) {
-        // Используем Number вместо parseInt для поддержки больших чисел (> 1 млрд)
-        const parsedPlays = Math.max(0, Math.floor(Number(trackData.playsCount.trim().replace(/\s/g, ''))) || 0);
+        // Удаляем пробелы и запятые, затем парсим как BigInt для поддержки больших чисел
+        const cleaned = trackData.playsCount.trim().replace(/[\s,]/g, '');
+        try {
+          // Проверяем, что строка содержит только цифры
+          if (!/^\d+$/.test(cleaned)) {
+            toast.error('Пожалуйста, введите только цифры (можно использовать пробелы и запятые)');
+            return;
+          }
+          
+          const bigIntValue = BigInt(cleaned);
+          // PostgreSQL Int может хранить до 2,147,483,647
+          const MAX_INT = BigInt(2147483647);
+          let finalValue = bigIntValue;
+          
+          if (bigIntValue > MAX_INT) {
+            // Автоматически обрезаем до максимума и предупреждаем пользователя
+            finalValue = MAX_INT;
+            const formattedInput = cleaned.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            toast.warning(
+              `Введенное значение (${formattedInput}) превышает максимум. Установлено: 2,147,483,647`,
+              { duration: 5000 }
+            );
+          }
+          
+          const parsedPlays = Number(finalValue);
+          if (parsedPlays < 0 || !Number.isFinite(parsedPlays)) {
+            toast.error('Некорректное значение прослушиваний');
+            return;
+          }
         formData.append('playsCount', String(parsedPlays));
+        } catch (error) {
+          toast.error('Некорректное значение прослушиваний. Убедитесь, что введено целое число.');
+          return;
+        }
       }
 
       const audioFile = audioFileRef.current?.files?.[0];
@@ -418,12 +449,12 @@ export function AdminPanel() {
       } else {
         // При создании
         if (playlistData.description?.trim()) {
-          formData.append('description', playlistData.description.trim());
-        }
-        formData.append('isPublic', String(playlistData.isPublic));
-        // При создании передаем только если есть треки
+        formData.append('description', playlistData.description.trim());
+      }
+      formData.append('isPublic', String(playlistData.isPublic));
+      // При создании передаем только если есть треки
         if (playlistData.trackIds.length > 0) {
-          formData.append('trackIds', JSON.stringify(playlistData.trackIds));
+        formData.append('trackIds', JSON.stringify(playlistData.trackIds));
         }
       }
 
@@ -526,7 +557,7 @@ export function AdminPanel() {
   const loadStats = async () => {
     try {
       const data = await apiClient.getStats();
-      setStats(data);
+        setStats(data);
       toast.success(t('statsUpdated') || 'Статистика обновлена');
     } catch (error: any) {
       console.error('Error loading stats:', error);
@@ -619,6 +650,22 @@ export function AdminPanel() {
       toast.error(t('trackHasNoArtist'));
       return;
     }
+    
+    // Проверяем и ограничиваем playsCount при загрузке
+    let playsCountValue = '';
+    if (track.playsCount) {
+      const maxInt = 2147483647;
+      if (track.playsCount > maxInt) {
+        playsCountValue = String(maxInt);
+        toast.warning(
+          `Значение прослушиваний в треке (${track.playsCount.toLocaleString('ru-RU')}) превышает максимум. Установлено: ${maxInt.toLocaleString('ru-RU')}`,
+          { duration: 5000 }
+        );
+      } else {
+        playsCountValue = String(track.playsCount);
+      }
+    }
+    
     setEditingTrackId(track.id);
     setTrackData({
       title: track.title,
@@ -630,7 +677,7 @@ export function AdminPanel() {
       duration: track.duration ? String(track.duration) : '',
       isExplicit: track.isExplicit ?? false,
       isPublished: track.isPublished ?? true,
-      playsCount: track.playsCount ? String(track.playsCount) : '',
+      playsCount: playsCountValue,
     });
     const artistSummary: ArtistSummary = {
       id: track.artist.id,
@@ -930,10 +977,34 @@ export function AdminPanel() {
                     Прослушивания
                   </label>
                   <input
-                    type="number"
+                    type="text"
                     min="0"
+                    max="2147483647"
                     value={trackData.playsCount}
-                    onChange={(e) => setTrackData({ ...trackData, playsCount: e.target.value })}
+                    onChange={(e) => {
+                      // Разрешаем только цифры, пробелы и запятые
+                      let value = e.target.value.replace(/[^\d\s,]/g, '');
+                      
+                      // Удаляем разделители для проверки лимита
+                      const cleaned = value.replace(/[\s,]/g, '');
+                      if (cleaned) {
+                        try {
+                          const numValue = BigInt(cleaned);
+                          const MAX_INT = BigInt(2147483647);
+                          if (numValue > MAX_INT) {
+                            // Автоматически обрезаем до максимума
+                            value = '2147483647';
+                            toast.warning('Значение автоматически установлено на максимум: 2,147,483,647', {
+                              duration: 3000,
+                            });
+                          }
+                        } catch (error) {
+                          // Игнорируем ошибки парсинга, пользователь еще вводит
+                        }
+                      }
+                      
+                      setTrackData({ ...trackData, playsCount: value });
+                    }}
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white placeholder:text-gray-400 focus:border-[#1ED760] focus:outline-none"
                     placeholder="0"
                   />

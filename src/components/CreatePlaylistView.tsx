@@ -1,16 +1,19 @@
 import { motion } from 'motion/react';
-import { ArrowLeft, Plus, Music, Image as ImageIcon, Search, X } from 'lucide-react';
+import { ArrowLeft, Plus, Music, Image as ImageIcon, Search, X, Edit2, Trash2 } from 'lucide-react';
 import { useSettings } from './SettingsContext';
 import { useState, useEffect, useRef } from 'react';
 import { Track } from './PlayerContext';
 import { ImageWithFallback } from '@/components/timurgenii/ImageWithFallback';
 import { formatDuration } from '../utils/time';
-import { apiClient } from '../api/client';
+import { apiClient, Playlist, PlaylistDetails } from '../api/client';
 import { toast } from 'sonner';
+import { resolveImageUrl } from '../utils/media';
 
 interface CreatePlaylistViewProps {
   onBack: () => void;
 }
+
+const FALLBACK_PLAYLIST_COVER = 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400';
 
 export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
   const { animations, t } = useSettings();
@@ -21,6 +24,10 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const coverFileInputRef = useRef<HTMLInputElement>(null);
+  const [editingPlaylistId, setEditingPlaylistId] = useState<string | null>(null);
+  const [userPlaylists, setUserPlaylists] = useState<Playlist[]>([]);
+  const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(false);
+  const [isPublic, setIsPublic] = useState(true);
 
   const getMotionProps = (delay: number = 0) => {
     if (!animations) {
@@ -55,7 +62,95 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
       }
     };
     loadTracks();
+    loadUserPlaylists();
   }, []);
+
+  const loadUserPlaylists = async () => {
+    try {
+      setIsLoadingPlaylists(true);
+      const playlists = await apiClient.getPlaylists();
+      setUserPlaylists(playlists);
+    } catch (error: any) {
+      toast.error(error?.message || t('failedToLoadPlaylists') || 'Не удалось загрузить плейлисты');
+    } finally {
+      setIsLoadingPlaylists(false);
+    }
+  };
+
+  const resetForm = () => {
+    setPlaylistName('');
+    setPlaylistDescription('');
+    setAddedTracks([]);
+    setCoverFile(null);
+    setCoverPreview(null);
+    setEditingPlaylistId(null);
+    setIsPublic(true);
+    if (coverFileInputRef.current) {
+      coverFileInputRef.current.value = '';
+    }
+  };
+
+  const handlePlaylistEdit = async (playlist: Playlist) => {
+    try {
+      const details: PlaylistDetails = await apiClient.getPlaylistById(playlist.id);
+      const trackIds = details?.tracks?.map((entry) => entry.track?.id).filter((id): id is string => Boolean(id)) ?? [];
+      
+      // Загружаем треки для отображения
+      const tracksToAdd: Track[] = [];
+      for (const trackId of trackIds) {
+        try {
+          const trackResponse = await apiClient.getTrackById(trackId);
+          const apiTrack = trackResponse.track;
+          tracksToAdd.push({
+            id: apiTrack.id,
+            title: apiTrack.title,
+            artist: apiTrack.artist?.name || 'Unknown Artist',
+            image: apiTrack.coverUrl || apiTrack.coverPath || '',
+            genre: apiTrack.genre?.name || 'Unknown',
+            duration: apiTrack.duration,
+          });
+        } catch (error) {
+          // Пропускаем треки, которые не удалось загрузить
+        }
+      }
+
+      setPlaylistName(playlist.title);
+      setPlaylistDescription(playlist.description || '');
+      setAddedTracks(tracksToAdd);
+      setIsPublic(playlist.isPublic);
+      setEditingPlaylistId(playlist.id);
+      
+      // Устанавливаем превью обложки, если есть
+      if (playlist.coverUrl) {
+        const coverUrl = resolveImageUrl(playlist.coverUrl);
+        if (coverUrl) {
+          setCoverPreview(coverUrl);
+        }
+      }
+      
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      toast.success(t('playlistLoaded') || 'Плейлист загружен для редактирования');
+    } catch (error: any) {
+      toast.error(error?.message || t('failedToLoadPlaylist') || 'Не удалось загрузить плейлист');
+    }
+  };
+
+  const handlePlaylistDelete = async (playlistId: string) => {
+    if (!window.confirm(t('deletePlaylistConfirm') || 'Вы уверены, что хотите удалить этот плейлист?')) {
+      return;
+    }
+    try {
+      await apiClient.deletePlaylist(playlistId);
+      toast.success(t('playlistDeleted') || 'Плейлист удален');
+      if (editingPlaylistId === playlistId) {
+        resetForm();
+      }
+      await loadUserPlaylists();
+      window.dispatchEvent(new CustomEvent('playlists:refresh'));
+    } catch (error: any) {
+      toast.error(error?.message || t('failedToDeletePlaylist') || 'Не удалось удалить плейлист');
+    }
+  };
 
   // Filter tracks based on search query
   const filteredTracks = allAvailableTracks.filter(track => {
@@ -89,7 +184,7 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
       if (playlistDescription.trim()) {
         formData.append('description', playlistDescription.trim());
       }
-      formData.append('isPublic', 'true');
+      formData.append('isPublic', String(isPublic));
       
       // Добавляем ID треков
       const trackIds = addedTracks.map(track => track.id).filter(Boolean) as string[];
@@ -102,14 +197,22 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
         formData.append('coverFile', coverFile);
       }
 
+      if (editingPlaylistId) {
+        await apiClient.updatePlaylist(editingPlaylistId, formData);
+        toast.success(t('playlistUpdated') || 'Плейлист обновлен');
+      } else {
       await apiClient.createPlaylist(formData);
+        toast.success(t('playlistCreated') || 'Плейлист создан');
+      }
       
       // Обновляем список плейлистов
+      await loadUserPlaylists();
       window.dispatchEvent(new Event('playlists:refresh'));
       
+      resetForm();
     onBack();
     } catch (error: any) {
-      toast.error(error?.message || 'Не удалось создать плейлист');
+      toast.error(error?.message || (editingPlaylistId ? 'Не удалось обновить плейлист' : 'Не удалось создать плейлист'));
     }
   };
 
@@ -164,11 +267,24 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
         <div className="max-w-4xl mx-auto">
           {/* Header */}
           <motion.div {...getMotionProps(0)} className="mb-8">
-            <h1 className="playlist-title-spotify text-4xl sm:text-5xl md:text-6xl text-white mb-2">
-              {t('createPlaylist')}
+            <div className="flex items-center justify-between mb-2">
+              <h1 className="playlist-title-spotify text-4xl sm:text-5xl md:text-6xl text-white">
+                {editingPlaylistId ? (t('editingPlaylist') || 'Редактирование плейлиста') : t('createPlaylist')}
             </h1>
+              {editingPlaylistId && (
+                <button
+                  onClick={resetForm}
+                  className="text-sm text-gray-300 hover:text-white px-3 py-1 rounded-lg hover:bg-white/10 fast-transition"
+                >
+                  {t('cancelEditing') || 'Отменить редактирование'}
+                </button>
+              )}
+            </div>
             <p className="text-white opacity-70 text-sm sm:text-base">
-              {t('createPlaylistDescription')}
+              {editingPlaylistId 
+                ? (t('editPlaylistDescription') || 'Измените данные плейлиста и сохраните изменения')
+                : t('createPlaylistDescription')
+              }
             </p>
           </motion.div>
 
@@ -261,6 +377,22 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
                 rows={4}
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:border-[#1ED760] focus:outline-none resize-none fast-transition"
               />
+            </motion.div>
+
+            {/* Public/Private Toggle */}
+            <motion.div {...getMotionProps(0.22)} className="glass-card rounded-2xl p-6">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="isPublic"
+                  checked={isPublic}
+                  onChange={(e) => setIsPublic(e.target.checked)}
+                  className="w-5 h-5 rounded border-white/20 bg-white/5 text-[#1ED760] focus:ring-[#1ED760] focus:ring-offset-0 cursor-pointer"
+                />
+                <label htmlFor="isPublic" className="text-white cursor-pointer">
+                  {t('publicPlaylist') || 'Публичный плейлист'}
+                </label>
+              </div>
             </motion.div>
 
             {/* Add Tracks Section */}
@@ -394,15 +526,80 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
                   color: playlistName.trim() ? '#000' : '#fff',
                 }}
               >
+                {editingPlaylistId ? (
+                  <>
+                    <Edit2 className="w-5 h-5" />
+                    <span>{t('saveChanges') || 'Сохранить изменения'}</span>
+                  </>
+                ) : (
+                  <>
                 <Plus className="w-5 h-5" />
                 <span>{t('createPlaylist')}</span>
+                  </>
+                )}
               </button>
               <button
-                onClick={onBack}
+                onClick={editingPlaylistId ? resetForm : onBack}
                 className="px-6 py-3 rounded-full glass text-white hover:bg-white/10 fast-transition"
               >
                 {t('cancel')}
               </button>
+            </motion.div>
+
+            {/* User Playlists List */}
+            <motion.div {...getMotionProps(0.35)} className="glass-card rounded-2xl p-6 mt-8">
+              <h2 className="text-xl font-semibold text-white mb-4">
+                {t('myPlaylists') || 'Мои плейлисты'}
+              </h2>
+              {isLoadingPlaylists ? (
+                <div className="text-center py-8 text-white/40">
+                  <p className="text-sm">{t('loading') || 'Загрузка...'}</p>
+                </div>
+              ) : userPlaylists.length === 0 ? (
+                <div className="text-center py-8 text-white/40">
+                  <Music className="w-12 h-12 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">{t('noPlaylists') || 'У вас пока нет плейлистов'}</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {userPlaylists.map((playlist) => (
+                    <div
+                      key={playlist.id}
+                      className="flex items-center gap-4 p-4 rounded-lg bg-white/5 hover:bg-white/10 fast-transition group"
+                    >
+                      <div className="w-14 h-14 rounded-lg overflow-hidden bg-white/10 flex-shrink-0">
+                        <img
+                          src={resolveImageUrl(playlist.coverUrl) || FALLBACK_PLAYLIST_COVER}
+                          alt={playlist.title}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-medium truncate">{playlist.title}</p>
+                        <p className="text-xs text-gray-400 truncate">
+                          {(playlist._count?.tracks ?? 0)} {t('tracks') || 'треков'} · {playlist.isPublic ? (t('public') || 'Публичный') : (t('private') || 'Приватный')}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handlePlaylistEdit(playlist)}
+                          className="opacity-0 group-hover:opacity-100 px-3 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 text-sm fast-transition flex items-center gap-2"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                          <span>{t('edit') || 'Редактировать'}</span>
+                        </button>
+                        <button
+                          onClick={() => handlePlaylistDelete(playlist.id)}
+                          className="opacity-0 group-hover:opacity-100 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-200 hover:bg-red-500/30 text-sm fast-transition flex items-center gap-2"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>{t('delete') || 'Удалить'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </motion.div>
           </div>
         </div>

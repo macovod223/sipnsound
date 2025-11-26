@@ -187,58 +187,58 @@ export function TrackMenu({ track, onClose }: TrackMenuProps) {
       </button>
 
       {typeof document !== 'undefined' && createPortal(
-        <AnimatePresence>
-          {isOpen && buttonRef.current && (
-            <motion.div
-              ref={menuRef}
-              initial={{ opacity: 0, scale: 0.95 }}
+      <AnimatePresence>
+        {isOpen && buttonRef.current && (
+          <motion.div
+            ref={menuRef}
+            initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.15 }}
-              className="fixed z-[10001] min-w-[200px] bg-[#282828]/95 backdrop-blur-md rounded-lg shadow-2xl overflow-hidden"
-              style={{
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.7)',
-                ...menuStyle,
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="py-1">
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            className="fixed z-[10001] min-w-[200px] bg-[#282828]/95 backdrop-blur-md rounded-lg shadow-2xl overflow-hidden"
+            style={{
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.7)',
+              ...menuStyle,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="py-1">
+              <button
+                onClick={handleAddToLiked}
+                className="w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10 flex items-center gap-3 transition-colors"
+              >
+                <Heart className={`w-4 h-4 ${isLiked(track.id || track.title) ? 'fill-[#1ED760] text-[#1ED760]' : ''}`} />
+                <span>{isLiked(track.id || track.title) ? t('removeFromLiked') : t('addToLiked')}</span>
+              </button>
+              
+              <button
+                onClick={handleAddToQueue}
+                className="w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10 flex items-center gap-3 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{t('addToQueue')}</span>
+              </button>
+              
+              <button
+                onClick={handleGoToArtist}
+                className="w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10 flex items-center gap-3 transition-colors"
+              >
+                <User className="w-4 h-4" />
+                <span>{t('goToArtist')}</span>
+              </button>
+              
+              {track.albumId && (
                 <button
-                  onClick={handleAddToLiked}
+                  onClick={handleGoToAlbum}
                   className="w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10 flex items-center gap-3 transition-colors"
                 >
-                  <Heart className={`w-4 h-4 ${isLiked(track.id || track.title) ? 'fill-[#1ED760] text-[#1ED760]' : ''}`} />
-                  <span>{isLiked(track.id || track.title) ? t('removeFromLiked') : t('addToLiked')}</span>
+                  <Disc className="w-4 h-4" />
+                  <span>{t('goToAlbum')}</span>
                 </button>
-                
-                <button
-                  onClick={handleAddToQueue}
-                  className="w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10 flex items-center gap-3 transition-colors"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>{t('addToQueue')}</span>
-                </button>
-                
-                <button
-                  onClick={handleGoToArtist}
-                  className="w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10 flex items-center gap-3 transition-colors"
-                >
-                  <User className="w-4 h-4" />
-                  <span>{t('goToArtist')}</span>
-                </button>
-                
-                {track.albumId && (
-                  <button
-                    onClick={handleGoToAlbum}
-                    className="w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10 flex items-center gap-3 transition-colors"
-                  >
-                    <Disc className="w-4 h-4" />
-                    <span>{t('goToAlbum')}</span>
-                  </button>
-                )}
-              </div>
-            </motion.div>
-          )}
+              )}
+            </div>
+          </motion.div>
+        )}
         </AnimatePresence>,
         document.body
       )}

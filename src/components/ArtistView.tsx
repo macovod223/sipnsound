@@ -287,9 +287,9 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
     const tracksForPlaylist = filteredTracks.map((track) => ({
       id: track.id,
       title: track.title,
-      artist: displayArtistName,
+        artist: displayArtistName,
       image: track.image || artistData?.image || FALLBACK_ARTIST_IMAGE,
-      genre: "Unknown",
+        genre: "Unknown",
       duration: track.duration ?? 0,
       audioUrl: track.audioUrl,
       lyricsUrl: track.lyricsUrl,
@@ -323,7 +323,7 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
       return;
     } else if (isCurrentTrack && !isPlaying) {
       // Если трек на паузе, просто запускаем
-      togglePlay();
+        togglePlay();
     } else {
       // Устанавливаем новый трек - setCurrentTrack автоматически запустит воспроизведение
       setCurrentTrack(trackToPlay, playlistTitle);

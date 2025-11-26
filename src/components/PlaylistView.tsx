@@ -170,7 +170,7 @@ export function PlaylistView() {
           const playlists = await apiClient.getPlaylists();
           const playlist = playlists.find((p: any) => p.title === selectedPlaylist.title);
           if (playlist && playlist.id) {
-              const playlistResponse = await apiClient.getPlaylistById(playlist.id);
+            const playlistResponse = await apiClient.getPlaylistById(playlist.id);
             if (playlistResponse) {
               // API возвращает PlaylistDetails напрямую (getPlaylistById уже извлекает playlist из ответа)
               const playlistData = playlistResponse;

@@ -61,17 +61,35 @@ const normalizeRelationId = (value: any): string | null | undefined => {
 };
 
 const parseNonNegativeInt = (value: any, fallback = 0) => {
-  if (value === undefined || value === null) {
+  if (value === undefined || value === null || value === '') {
     return fallback;
   }
-  // Используем Number вместо parseInt для поддержки больших чисел (> 1 млрд)
   // Удаляем пробелы и другие разделители
   const cleaned = String(value).replace(/[\s,]/g, '');
-  const parsed = Math.floor(Number(cleaned));
-  if (Number.isNaN(parsed) || parsed < 0 || !Number.isFinite(parsed)) {
+  
+  // Проверяем, что строка содержит только цифры
+  if (!/^\d+$/.test(cleaned)) {
+    return fallback;
+  }
+  
+  // Используем BigInt для больших чисел, затем конвертируем в Number
+  // PostgreSQL Int может хранить до 2,147,483,647
+  try {
+    const bigIntValue = BigInt(cleaned);
+    // Проверяем, что число не превышает максимальное значение для PostgreSQL Int
+    const MAX_INT = BigInt(2147483647);
+    if (bigIntValue > MAX_INT) {
+      throw new Error('Value exceeds maximum integer limit (2,147,483,647)');
+    }
+    const parsed = Number(bigIntValue);
+    if (parsed < 0 || !Number.isFinite(parsed)) {
     return fallback;
   }
   return parsed;
+  } catch (error) {
+    // Если не удалось распарсить, возвращаем fallback
+    return fallback;
+  }
 };
 
 // POST /api/admin/tracks - Создание трека

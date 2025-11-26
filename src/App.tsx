@@ -356,7 +356,7 @@ function MainContent() {
             <div className={`flex-1 flex flex-col min-w-0 overflow-hidden transition-all duration-200 ${selectedPlaylist || activeView !== 'home' || showAllSection || selectedArtist || showCreatePlaylist ? '' : compactView ? 'gap-2 sm:gap-3 md:gap-4' : 'gap-4 sm:gap-5 md:gap-7'}`}>
             {selectedPlaylist ? (
               <Suspense fallback={<LoadingSpinner />}>
-                <PlaylistView />
+              <PlaylistView />
               </Suspense>
             ) : selectedArtist ? (
               <ArtistView onBack={closeArtistView} artist={selectedArtist} />
@@ -377,7 +377,7 @@ function MainContent() {
             ) : activeView === 'admin' ? (
               <div className="flex-1 min-h-0 overflow-hidden rounded-3xl">
                 <Suspense fallback={<LoadingSpinner />}>
-                  <AdminPanel />
+              <AdminPanel />
                 </Suspense>
               </div>
             ) : (
@@ -653,7 +653,7 @@ function MainContent() {
 
       {/* Fullscreen Player */}
       <Suspense fallback={null}>
-        <FullscreenPlayer />
+      <FullscreenPlayer />
       </Suspense>
       </div>
     </>
@@ -663,14 +663,14 @@ function MainContent() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <SettingsProvider>
-        <AuthProvider>
-          <PlayerProvider>
-            <MainContent />
-            <Toaster />
-          </PlayerProvider>
-        </AuthProvider>
-      </SettingsProvider>
+    <SettingsProvider>
+      <AuthProvider>
+        <PlayerProvider>
+          <MainContent />
+          <Toaster />
+        </PlayerProvider>
+      </AuthProvider>
+    </SettingsProvider>
     </ErrorBoundary>
   );
 }
