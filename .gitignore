@@ -43,10 +43,12 @@ backend/storage/tracks/*
 backend/storage/covers/*
 backend/storage/artists/*
 backend/storage/lyrics/*
+backend/storage/playlist-covers/*
 !backend/storage/tracks/.gitkeep
 !backend/storage/covers/.gitkeep
 !backend/storage/artists/.gitkeep
 !backend/storage/lyrics/.gitkeep
+!backend/storage/playlist-covers/.gitkeep
 
 # Prisma
 backend/prisma/dev.db
