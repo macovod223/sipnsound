@@ -199,7 +199,7 @@ export const createPlaylist = asyncHandler(
         where: { id: { in: trackIds } },
         select: { id: true },
       });
-      const existingTrackIds = new Set(existingTracks.map(t => t.id));
+      const existingTrackIds = new Set(existingTracks.map((t: { id: string }) => t.id));
       const invalidTrackIds = trackIds.filter(id => !existingTrackIds.has(id));
       
       if (invalidTrackIds.length > 0) {
@@ -313,7 +313,7 @@ export const updatePlaylist = asyncHandler(
           where: { id: { in: trackIds } },
           select: { id: true },
         });
-        const existingTrackIds = new Set(existingTracks.map(t => t.id));
+        const existingTrackIds = new Set(existingTracks.map((t: { id: string }) => t.id));
         const invalidTrackIds = trackIds.filter(id => !existingTrackIds.has(id));
         
         if (invalidTrackIds.length > 0) {
@@ -423,7 +423,7 @@ export const getPlaylistCover = (req: Request, res: Response) => {
   const stream = fs.createReadStream(imagePath);
 
   res.setHeader('Content-Type', contentType);
-  stream.on('error', (error) => {
+  stream.on('error', () => {
     // Логирование ошибок уже обрабатывается через Winston logger
     if (!res.headersSent) {
       res.status(500).json({ message: 'Failed to stream playlist cover' });

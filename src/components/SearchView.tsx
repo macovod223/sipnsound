@@ -24,7 +24,7 @@ const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1470225620780-dba8ba36
 
 
 export function SearchView({ searchQuery, onClose }: SearchViewProps) {
-  const { t } = useSettings();
+  const { t, animations } = useSettings();
   const { setCurrentTrack, openPlaylist, openArtistView } = usePlayer();
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'track' | 'artist' | 'playlist' | 'album'>('all');
   const [remoteArtists, setRemoteArtists] = useState<ArtistSummary[]>([]);
@@ -136,7 +136,7 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
       .map((album) => ({
         type: 'album',
         title: album.title,
-        subtitle: `${album.artist?.name || 'Unknown'} • ${album.year || '—'} • ${album.type === 'single' ? 'Сингл' : 'Альбом'}`,
+        subtitle: `${album.year ? `${album.year} • ` : ''}${album.artist?.name || 'Unknown'} • ${album.type === 'single' ? 'Сингл' : 'Альбом'}`,
         image: resolveImageUrl(album.coverUrl || album.coverPath, FALLBACK_IMAGE) || FALLBACK_IMAGE,
         data: album,
       }));
@@ -231,7 +231,7 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
             const albumType = album.type?.toLowerCase() === 'album' ? 'album' : 'single';
         openPlaylist({
               title: album.title || item.title,
-              artist: `${album.year || ''} • ${album.artist?.name || 'Unknown'}`,
+              artist: `${album.year ? `${album.year}\u00a0` : ''}${album.artist?.name || 'Unknown'}`,
           image: item.image,
               type: albumType,
               albumId: album.id,
@@ -352,9 +352,9 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
                       {items.map((item, index) => (
                         <motion.div
                           key={`${item.type}-${item.title}-${index}`}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.05 }}
+                          initial={animations ? { opacity: 0, y: 10 } : false}
+                          animate={animations ? { opacity: 1, y: 0 } : false}
+                          transition={animations ? { delay: index * 0.05 } : { duration: 0 }}
                           className="glass-card rounded-xl p-3 flex items-center gap-3 group hover:bg-white/10 instant-transition gpu-accelerated cursor-pointer"
                           onClick={() => handleItemClick(item)}
                         >
@@ -386,9 +386,9 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
                       {items.map((item, index) => (
                         <motion.div
                           key={`${item.type}-${item.title}-${index}`}
-                          initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ delay: index * 0.05 }}
+                          initial={animations ? { opacity: 0, scale: 0.9 } : false}
+                          animate={animations ? { opacity: 1, scale: 1 } : false}
+                          transition={animations ? { delay: index * 0.05 } : { duration: 0 }}
                           className="glass-card rounded-xl p-4 group hover:bg-white/10 instant-transition gpu-accelerated cursor-pointer"
                           onClick={() => handleItemClick(item)}
                         >
@@ -402,9 +402,9 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
                               <motion.div
                                 className="absolute bottom-2 right-2 w-12 h-12 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 shadow-xl"
                                 style={{ background: '#1ED760' }}
-                                initial={{ y: 10 }}
-                                whileHover={{ scale: 1.1 }}
-                                transition={{ duration: 0.2 }}
+                                initial={animations ? { y: 10 } : false}
+                                whileHover={animations ? { scale: 1.1 } : {}}
+                                transition={animations ? { duration: 0.2 } : { duration: 0 }}
                               >
                                 <Play className="w-5 h-5" style={{ color: '#000000' }} fill="#000000" />
                               </motion.div>
@@ -432,9 +432,9 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
                 {filteredResults.map((item, index) => (
                   <motion.div
                     key={`${item.type}-${item.title}-${index}`}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.05 }}
+                    initial={animations ? { opacity: 0, y: 10 } : false}
+                    animate={animations ? { opacity: 1, y: 0 } : false}
+                    transition={animations ? { delay: index * 0.05 } : { duration: 0 }}
                     className="glass-card rounded-xl p-3 flex items-center gap-3 group hover:bg-white/10 instant-transition gpu-accelerated cursor-pointer"
                     onClick={() => handleItemClick(item)}
                   >
@@ -466,9 +466,9 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
                 {filteredResults.map((item, index) => (
                   <motion.div
                     key={`${item.type}-${item.title}-${index}`}
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: index * 0.05 }}
+                    initial={animations ? { opacity: 0, scale: 0.9 } : false}
+                    animate={animations ? { opacity: 1, scale: 1 } : false}
+                    transition={animations ? { delay: index * 0.05 } : { duration: 0 }}
                     className="glass-card rounded-xl p-4 group hover:bg-white/10 instant-transition gpu-accelerated cursor-pointer"
                     onClick={() => handleItemClick(item)}
                   >

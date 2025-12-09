@@ -205,9 +205,9 @@ export function NowPlaying({ onQueueToggle, isQueueOpen }: NowPlayingProps) {
                   background: '#ffffff',
                 }}
               >
-                {/* Thumb that appears on hover */}
+                {/* Thumb that appears on hover - скрыт */}
                 <div 
-                  className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="hidden"
                   style={{ transform: 'translate(50%, -50%)' }}
                 />
               </div>
@@ -273,23 +273,12 @@ export function NowPlaying({ onQueueToggle, isQueueOpen }: NowPlayingProps) {
               }}
             >
               <div 
-                className="h-full rounded-full relative transition-all duration-75 ease-out" 
+                className="h-full rounded-full" 
                 style={{ 
                   width: `${volume}%`,
                   background: '#ffffff',
-                  transition: 'width 0.075s ease-out',
-                }} 
-              >
-                {/* Thumb - Spotify style, всегда видим при hover или drag */}
-                <div 
-                  className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white transition-opacity duration-75"
-                  style={{ 
-                    opacity: 1,
-                    transform: 'translate(50%, -50%) translateZ(0)',
-                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
                   }}
                 />
-              </div>
             </div>
           </div>
 

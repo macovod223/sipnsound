@@ -2,9 +2,13 @@ import { motion } from 'motion/react';
 import { Music, Clock, Heart, ListMusic, TrendingUp, Play, ArrowLeft, Pause } from 'lucide-react';
 import { usePlayer } from './PlayerContext';
 import { useSettings } from './SettingsContext';
+
+import { pluralize, pluralizeEn } from './translations';
 import { useState, useEffect } from 'react';
 import { apiClient } from '../api/client';
 import { resolveImageUrl } from '../utils/media';
+
+const LIKED_SONGS_KEY = 'Liked Songs';
 
 type CategoryView = 'browse' | 'liked-songs' | 'playlists' | 'albums' | 'artists' | 'recently-played';
 
@@ -105,7 +109,7 @@ export function LibraryView() {
     
     // Слушаем событие обновления артистов
     const handleRefresh = () => {
-      loadArtists();
+      loadData();
     };
     window.addEventListener('artists:refresh', handleRefresh);
     return () => {
@@ -135,35 +139,45 @@ export function LibraryView() {
       title: settings.t('likedSongs'),
       count: likedTracksCount,
       color: 'linear-gradient(135deg, #A78BFA 0%, #EC4899 50%, #00F5FF 100%)',
-      subtitle: `${likedTracksCount} ${settings.t('items')}`,
+      subtitle: settings.language === 'Русский' 
+        ? `${likedTracksCount} ${pluralize(likedTracksCount, 'трек', 'трека', 'треков')}`
+        : `${likedTracksCount} ${pluralizeEn(likedTracksCount, 'track')}`,
     },
     {
       icon: ListMusic,
       title: settings.t('playlists'),
       count: playlistsData.length,
       color: 'linear-gradient(135deg, #1ED760 0%, #1DB954 100%)',
-      subtitle: `${playlistsData.length} ${settings.t('items')}`,
+      subtitle: settings.language === 'Русский' 
+        ? `${playlistsData.length} ${pluralize(playlistsData.length, 'плейлист', 'плейлиста', 'плейлистов')}`
+        : `${playlistsData.length} ${pluralizeEn(playlistsData.length, 'playlist')}`,
     },
     {
       icon: Music,
       title: settings.t('albums'),
       count: albumsData.length,
       color: 'linear-gradient(135deg, #F59E0B 0%, #EF4444 100%)',
-      subtitle: `${albumsData.length} ${settings.t('items')}`,
+      subtitle: settings.language === 'Русский' 
+        ? `${albumsData.length} ${pluralize(albumsData.length, 'альбом', 'альбома', 'альбомов')}`
+        : `${albumsData.length} ${pluralizeEn(albumsData.length, 'album')}`,
     },
     {
       icon: TrendingUp,
       title: settings.t('artists'),
       count: artistsData.length,
       color: 'linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%)',
-      subtitle: `${artistsData.length} ${settings.t('items')}`,
+      subtitle: settings.language === 'Русский' 
+        ? `${artistsData.length} ${pluralize(artistsData.length, 'артист', 'артиста', 'артистов')}`
+        : `${artistsData.length} ${pluralizeEn(artistsData.length, 'artist')}`,
     },
     {
       icon: Clock,
       title: settings.t('recentlyPlayed'),
       count: allTracks.slice(0, 20).length,
       color: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-      subtitle: `${allTracks.slice(0, 20).length} ${settings.t('items')}`,
+      subtitle: settings.language === 'Русский' 
+        ? `${allTracks.slice(0, 20).length} ${pluralize(allTracks.slice(0, 20).length, 'трек', 'трека', 'треков')}`
+        : `${allTracks.slice(0, 20).length} ${pluralizeEn(allTracks.slice(0, 20).length, 'track')}`,
     },
   ];
 
@@ -395,7 +409,7 @@ export function LibraryView() {
         title: playlist.title, 
         artist: `${playlist.count} ${playlist.count === 1 ? settings.t('track') : settings.t('tracks')}`, 
         image: resolvedImage,
-        type: playlist.title === 'Liked Songs' ? 'liked' : 'playlist',
+        type: playlist.title === LIKED_SONGS_KEY ? 'liked' : 'playlist',
         returnTo: 'playlists'
       });
     };
@@ -404,9 +418,9 @@ export function LibraryView() {
       e.stopPropagation();
       
       // Если плейлист не существует, открываем его как плейлист для загрузки треков
-      if (playlist.title === 'Liked Songs') {
+      if (playlist.title === LIKED_SONGS_KEY) {
         openPlaylist({
-          title: 'Liked Songs',
+          title: LIKED_SONGS_KEY,
           artist: 'Ваши любимые треки',
           image: '',
           type: 'liked',
@@ -417,7 +431,7 @@ export function LibraryView() {
         openPlaylist({
           id: playlist.id,
           title: playlist.title,
-          artist: 'Плейлист',
+          artist: settings.t('yourPlaylist'),
           image: resolvedImage,
           type: 'playlist',
         });
@@ -443,6 +457,7 @@ export function LibraryView() {
             const isCurrentPlaylist = currentTrack?.playlistTitle === playlist.title;
             const isThisPlaying = isCurrentPlaylist && isPlaying;
             const isHovered = hoveredPlaylist === playlist.title;
+            const displayTitle = playlist.title === LIKED_SONGS_KEY ? settings.t('likedSongs') : playlist.title;
 
             return (
               <motion.div
@@ -467,7 +482,7 @@ export function LibraryView() {
 
                 {/* Square playlist cover */}
                 <div className="w-full aspect-square rounded-lg overflow-hidden mb-3 relative">
-                  {playlist.title === 'Liked Songs' ? (
+                  {playlist.title === LIKED_SONGS_KEY ? (
                     <div 
                       className="w-full h-full flex items-center justify-center relative"
                       style={{ 
@@ -488,16 +503,16 @@ export function LibraryView() {
                   )}
                   
                   {/* Play button on hover - показываем только если плейлист существует или это "Liked Songs" */}
-                  {(playlist.title === 'Liked Songs') && (
+                  {(playlist.title === LIKED_SONGS_KEY) && (
                   <motion.div
                     className="absolute bottom-2 right-2"
-                    initial={{ opacity: 0, scale: 0, y: 8 }}
-                    animate={{
+                    initial={settings.animations ? { opacity: 0, scale: 0, y: 8 } : false}
+                    animate={settings.animations ? {
                       opacity: isHovered || isThisPlaying ? 1 : 0,
                       scale: isHovered || isThisPlaying ? 1 : 0,
                       y: isHovered || isThisPlaying ? 0 : 8,
-                    }}
-                    transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+                    } : { opacity: isHovered || isThisPlaying ? 1 : 0, scale: isHovered || isThisPlaying ? 1 : 0, y: isHovered || isThisPlaying ? 0 : 8 }}
+                    transition={settings.animations ? { duration: 0.2, ease: [0.25, 0.1, 0.25, 1] } : { duration: 0 }}
                   >
                     <motion.button
                       onClick={(e) => handlePlaylistPlay(e, playlist)}
@@ -506,8 +521,8 @@ export function LibraryView() {
                         background: '#1ED760',
                         boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
                       }}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
+                      whileHover={settings.animations ? { scale: 1.05 } : {}}
+                      whileTap={settings.animations ? { scale: 0.95 } : {}}
                     >
                       {isThisPlaying ? (
                         <Pause className="w-5 h-5 sm:w-6 sm:h-6 text-black fill-black" />
@@ -522,7 +537,7 @@ export function LibraryView() {
                 {/* Playlist info */}
                 <div className="relative z-10">
                   <h4 className="text-white text-xs sm:text-sm truncate mb-1">
-                    {playlist.title}
+                    {displayTitle}
                   </h4>
                   <p className="text-white opacity-60 text-xs truncate">
                     {playlist.count} {playlist.count === 1 ? settings.t('track') : settings.t('tracks')}
@@ -692,13 +707,13 @@ export function LibraryView() {
                   {/* Play button on hover */}
                   <motion.div
                     className="absolute bottom-2 right-2"
-                    initial={{ opacity: 0, scale: 0, y: 8 }}
-                    animate={{
+                    initial={settings.animations ? { opacity: 0, scale: 0, y: 8 } : false}
+                    animate={settings.animations ? {
                       opacity: isHovered ? 1 : 0,
                       scale: isHovered ? 1 : 0,
                       y: isHovered ? 0 : 8,
-                    }}
-                    transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+                    } : { opacity: isHovered ? 1 : 0, scale: isHovered ? 1 : 0, y: isHovered ? 0 : 8 }}
+                    transition={settings.animations ? { duration: 0.2, ease: [0.25, 0.1, 0.25, 1] } : { duration: 0 }}
                   >
                     <motion.button
                       onClick={(e) => handleAlbumPlay(e, { ...album, year: album.year || 0 })}
@@ -707,8 +722,8 @@ export function LibraryView() {
                         background: '#1ED760',
                         boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
                       }}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
+                      whileHover={settings.animations ? { scale: 1.05 } : {}}
+                      whileTap={settings.animations ? { scale: 0.95 } : {}}
                     >
                       <Play className="w-5 h-5 sm:w-6 sm:h-6 text-black fill-black ml-0.5" />
                     </motion.button>
@@ -741,7 +756,7 @@ export function LibraryView() {
                       e.stopPropagation();
                       openPlaylist({
                         title: album.title,
-                        artist: `${album.year || ''} • ${album.artist}`,
+                        artist: `${album.year ? `${album.year} • ` : ''}${album.artist}`,
                         image: resolveImageUrl(album.image) || '',
                         type: album.type,
                         albumId: album.id,

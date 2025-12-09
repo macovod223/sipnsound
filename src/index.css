@@ -3544,43 +3544,74 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   touch-action: none;
 }
 
+/* Фон с мягкими переливами как в Apple Music - без резких смен */
 .lyrics-wrap:before {
   content: "";
   background-image: var(--lyrics-bg-url);
-  filter: blur(52px) saturate(188%) brightness(.96) hue-rotate(var(--hue, 0deg));
-  transform: translate3d(0, 0, 0) scale(1.14);
+  /* Мягкие фильтры с контрастностью 1.15 */
+  filter: blur(85px) saturate(150%) brightness(1.05) contrast(1.15);
+  transform: translate3d(0, 0, 0) scale(1.28);
   opacity: .92;
-  will-change: transform;
+  will-change: filter, transform;
   transform-style: preserve-3d;
   backface-visibility: hidden;
   z-index: 0;
-  background-position: center;
+  background-position: center center;
   background-size: cover;
-  animation: 46s ease-in-out infinite alternate lyrics-huePulse;
+  /* Мягкая анимация переливов - очень медленная и плавная */
+  animation: 
+    50s ease-in-out infinite alternate lyrics-subtleHue,
+    60s ease-in-out infinite alternate lyrics-subtlePan;
   position: absolute;
-  inset: -14%;
+  inset: -28%;
   contain: layout style paint;
 }
 
-@keyframes lyrics-huePulse {
-  from {
-    --hue: 0deg;
+/* Мягкая анимация оттенка - очень плавная без резких смен */
+@keyframes lyrics-subtleHue {
+  0% {
+    filter: blur(85px) saturate(145%) brightness(1.03) contrast(1.12) hue-rotate(-3deg);
   }
-
-  to {
-    --hue: 12deg;
+  50% {
+    filter: blur(85px) saturate(155%) brightness(1.07) contrast(1.15) hue-rotate(0deg);
+  }
+  100% {
+    filter: blur(85px) saturate(150%) brightness(1.05) contrast(1.15) hue-rotate(3deg);
   }
 }
 
+/* Мягкая анимация панорамирования - очень медленная */
+@keyframes lyrics-subtlePan {
+  0% {
+    background-position: 48% 48%;
+    transform: translate3d(0, 0, 0) scale(1.26);
+  }
+  50% {
+    background-position: 52% 52%;
+    transform: translate3d(0, 0, 0) scale(1.3);
+  }
+  100% {
+    background-position: 48% 48%;
+    transform: translate3d(0, 0, 0) scale(1.28);
+  }
+}
+
+/* Улучшенный темный overlay с градиентом для лучшей цветопередачи */
 .lyrics-wrap:after {
   content: "";
-  background: radial-gradient(920px 580px at var(--p1x, 24%) var(--p1y, 18%), #ffffff29, transparent 60%), radial-gradient(1220px 740px at var(--p2x, 80%) var(--p2y, 86%), #0000004d, transparent 66%), radial-gradient(1100px 640px at 50% 120%, #ffffff1a, transparent 70%);
-  mix-blend-mode: soft-light;
+  /* Более сложный градиент для лучшей видимости текста и сохранения цветов */
+  background: 
+    radial-gradient(ellipse at top left, rgba(0, 0, 0, 0.3) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(0, 0, 0, 0.4) 0%, transparent 50%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.65) 50%, rgba(0, 0, 0, 0.55) 100%);
   pointer-events: none;
   z-index: 1;
-  animation: 20s ease-in-out infinite alternate lyrics-blobs;
   position: absolute;
-  inset: -12%;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* Добавляем легкое смешивание для более естественного вида */
+  mix-blend-mode: multiply;
 }
 
 @keyframes lyrics-blobs {
@@ -3611,6 +3642,7 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   display: flex;
   position: relative;
   overflow: visible;
+  /* Контент должен быть поверх затемнения */
 }
 
 .lyrics-top {
@@ -4006,19 +4038,16 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
 
 .lyrics-viewport {
   touch-action: pan-y;
-  --mid: .4;
-  --guard: .16;
-  --fadeH: 14px;
+  --mid: .5;
+  --guard: .0;
+  --fadeH: 0px;
   --curH: 48px;
   --cut: calc((var(--mid)  - var(--guard)) * 100%);
   width: min(980px, 100%);
   height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
-  -webkit-mask-image: linear-gradient(180deg, #0000 0%, #0000 calc(var(--cut)  - var(--fadeH)), #fff var(--cut), #fff 100%);
-  mask-image: linear-gradient(180deg, #0000 0%, #0000 calc(var(--cut)  - var(--fadeH)), #fff var(--cut), #fff 100%);
   position: relative;
 }
 
@@ -4029,20 +4058,25 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   contain: paint layout style;
   transform: translate3d(0, 0, 0);
   flex-direction: column;
-  gap: 1.12em;
+  gap: 1.8em;
   display: flex;
   position: absolute;
   inset: 0;
   isolation: isolate;
   /* Transition будет устанавливаться динамически в JS */
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Rail сдвигается вверх при смене строк */
 }
 
 .lyrics-pad.lyrics-top {
-  flex: 0 0 clamp(32px, calc(var(--mid) * 100% - var(--curH) / 2), 80%);
+  flex: 1 1 0;
+  min-height: 0;
+  padding-top: 100px;
 }
 
 .lyrics-pad.lyrics-bottom {
-  flex: auto;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .lyrics-row {
@@ -4058,7 +4092,7 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   will-change: transform, opacity;
   contain: layout style paint;
   letter-spacing: -.02em;
-  font-size: 46px;
+  font-size: 37px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-weight: 700;
   line-height: 1.3;
@@ -4071,19 +4105,19 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
 
 @media (width <= 1400px) {
   .lyrics-row {
-    font-size: 44px;
+    font-size: 35px;
   }
 }
 
 @media (width <= 1280px) {
   .lyrics-row {
-    font-size: 40px;
+    font-size: 33px;
   }
 }
 
 @media (width <= 1100px) {
   .lyrics-row {
-    font-size: 44px;
+    font-size: 31px;
   }
 }
 
@@ -4100,8 +4134,24 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
 }
 
 .lyrics-row.leaving {
+  opacity: 0 !important;
+  transition: opacity 0.25s ease-out !important;
+  pointer-events: none;
+  /* Отключаем transform чтобы избежать конфликтов */
+  transform: translateZ(0) !important;
+}
+
+/* Анимация выхода - старая строка уходит вверх */
+.lyrics-row.exiting {
   opacity: 0;
-  transition: opacity .2s cubic-bezier(.4, 0, .2, 1);
+  transform: translateY(-30px);
+  pointer-events: none;
+}
+
+/* Анимация входа - новая строка появляется снизу */
+.lyrics-row.entering {
+  opacity: 0;
+  transform: translateY(30px);
 }
 
 .lyrics-row.lyrics-cur {
@@ -4114,20 +4164,22 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
 }
 
 .bump {
-  animation: .4s cubic-bezier(.22, .8, .24, 1) both lyrics-bump;
+  animation: .3s cubic-bezier(.22, .8, .24, 1) both lyrics-bump;
+  /* Гарантируем что bump не конфликтует с другими анимациями */
+  will-change: transform, opacity, filter;
 }
 
 @keyframes lyrics-bump {
   from {
-    opacity: .96;
-    filter: blur(.2px);
-    transform: translateY(6px);
+    opacity: .98;
+    filter: blur(.1px);
+    transform: translateY(4px) translateZ(0);
   }
 
   to {
     opacity: 1;
     filter: none;
-    transform: none;
+    transform: translateZ(0);
   }
 }
 
@@ -4515,4 +4567,46 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Ползунок кроссфейда в стиле Spotify - без белого тумблера */
+.crossfade-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  transition: height 0.2s ease;
+  cursor: pointer;
+}
+
+.crossfade-slider:hover {
+  height: 6px;
+}
+
+.crossfade-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 0;
+  cursor: pointer;
+}
+
+.crossfade-slider::-moz-range-thumb {
+  width: 0;
+  height: 0;
+  cursor: pointer;
+  border: none;
+}
+
+.crossfade-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.crossfade-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  cursor: pointer;
 }

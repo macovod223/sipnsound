@@ -94,11 +94,12 @@ export const translations = {
     
     // Playback settings
     crossfadeSongs: 'Crossfade songs',
+    crossfadeDuration: 'Crossfade duration',
     gaplessPlayback: 'Gapless playback',
     normalizeVolume: 'Normalize volume',
     
     // Display settings
-    enableAnimations: 'Enable animations',
+    enableAnimations: 'Interface animations',
     highContrastMode: 'High contrast mode',
     compactView: 'Compact view',
     
@@ -113,6 +114,7 @@ export const translations = {
     
     // Quick access
     likedSongs: 'Liked Songs',
+    yourPlaylist: 'Your playlist',
     
     // Artist view
     popularTracks: 'Popular Tracks',
@@ -475,11 +477,12 @@ export const translations = {
     
     // Playback settings
     crossfadeSongs: 'Плавный переход между треками',
+    crossfadeDuration: 'Длительность перехода',
     gaplessPlayback: 'Воспроизведение без пауз',
     normalizeVolume: 'Нормализация громкости',
     
     // Display settings
-    enableAnimations: 'Включить анимации',
+    enableAnimations: 'Анимации интерфейса',
     highContrastMode: 'Режим высокой контрастности',
     compactView: 'Компактный вид',
     
@@ -494,6 +497,7 @@ export const translations = {
     
     // Quick access
     likedSongs: 'Любимые треки',
+    yourPlaylist: 'Ваш плейлист',
     
     // Artist view
     popularTracks: 'Популярные треки',
@@ -768,4 +772,29 @@ export type TranslationKey = keyof typeof translations.English;
 
 export function getTranslation(language: Language, key: TranslationKey): string {
   return translations[language][key] || translations.English[key];
+}
+
+// Функция для склонения русских слов
+export function pluralize(count: number, one: string, few: string, many: string): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  
+  if (mod100 >= 11 && mod100 <= 19) {
+    return many;
+  }
+  
+  if (mod10 === 1) {
+    return one;
+  }
+  
+  if (mod10 >= 2 && mod10 <= 4) {
+    return few;
+  }
+  
+  return many;
+}
+
+// Функция для множественного числа в английском
+export function pluralizeEn(count: number, word: string): string {
+  return count === 1 ? word : `${word}s`;
 }

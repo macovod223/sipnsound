@@ -7,7 +7,7 @@ import { asyncHandler } from '../middlewares/error.middleware';
  * Получение статистики для админ-панели
  */
 export const getStats = asyncHandler(
-  async (req: Request, res: Response) => {
+  async (_req: Request, res: Response) => {
     // Подсчитываем количество треков
     const tracksCount = await prisma.track.count();
 

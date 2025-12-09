@@ -1,28 +1,95 @@
-import { Play, Heart, Pause } from 'lucide-react';
+import { Play, Heart, Pause, Radio } from 'lucide-react';
 import { useState } from 'react';
 import { usePlayer } from './PlayerContext';
 import { useSettings } from './SettingsContext';
 import { MusicVisualizer } from './UI';
 import { motion } from 'motion/react';
 import { apiClient } from '../api/client';
+import { toast } from 'sonner';
+import { resolveMediaUrl } from '../utils/media';
 
 interface QuickAccessCardProps {
   title: string;
   image: string;
   index: number;
-  type?: 'liked' | 'playlist' | 'artist' | 'album';
+  type?: 'liked' | 'playlist' | 'artist' | 'album' | 'dj';
   id?: string;
   onHoverChange?: (playlistName: string | null) => void;
 }
 
+const LIKED_SONGS_KEY = 'Liked Songs';
+const AI_DJ_PLAYLIST_NAME = 'DJ';
+
 export function QuickAccessCard({ title, image, index, type = 'playlist', id, onHoverChange }: QuickAccessCardProps) {
   const [isHovered, setIsHovered] = useState(false);
-  const { setCurrentTrack, togglePlay, currentTrack, isPlaying: globalIsPlaying, openPlaylist, openArtistView } = usePlayer();
-  const { animations } = useSettings();
+  const {
+    setCurrentTrack,
+    togglePlay,
+    currentTrack,
+    isPlaying: globalIsPlaying,
+    openPlaylist,
+    openArtistView,
+    setCurrentPlaylistTracks,
+  } = usePlayer();
+  const { animations, t } = useSettings();
   const isCurrentTrack = currentTrack?.playlistTitle === title;
   const isPlaying = isCurrentTrack && globalIsPlaying;
 
+  const startDjSession = async () => {
+    try {
+      const response = await apiClient.getAIDJSession(25);
+      const tracks = response?.tracks || [];
+
+      if (!Array.isArray(tracks) || tracks.length === 0) {
+        toast.error('AI DJ не вернул треки');
+        return;
+      }
+
+      const normalizedTracks = tracks.map((track: any) => {
+        const artistName =
+          typeof track.artist === 'string'
+            ? track.artist
+            : track.artist?.name || 'Unknown Artist';
+
+        return {
+          id: track.id,
+          title: track.title,
+          artist: artistName,
+          image: resolveMediaUrl(
+            track.image ||
+              track.coverUrl ||
+              track.coverPath ||
+              track.album?.coverUrl ||
+              track.album?.coverPath
+          ) || '',
+          genre:
+            typeof track.genre === 'string'
+              ? track.genre
+              : track.genre?.name || 'Unknown',
+          duration: track.duration || 225,
+          lyrics: track.lyrics,
+          playlistTitle: AI_DJ_PLAYLIST_NAME,
+          audioUrl: resolveMediaUrl(track.audioUrl || track.audioPath),
+          playsCount: track.playsCount ?? 0,
+        };
+      });
+
+      setCurrentPlaylistTracks(normalizedTracks);
+      setCurrentTrack(normalizedTracks[0], AI_DJ_PLAYLIST_NAME);
+      toast.success('AI DJ запущен — подборка готова');
+    } catch (error: any) {
+      toast.error(error?.message || 'Не удалось запустить AI DJ');
+    }
+  };
+
+  const displayTitle = type === 'liked' ? t('likedSongs') : title;
+
   const handleCardClick = async () => {
+    if (type === 'dj') {
+      await startDjSession();
+      return;
+    }
+
     if (type === 'artist') {
       openArtistView({ id, name: title });
     } else if (type === 'album' && id) {
@@ -33,7 +100,7 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
         const albumType = album?.type === 'album' ? 'album' : 'single';
         openPlaylist({ 
           title, 
-          artist: album?.artist?.name || 'Альбом', 
+          artist: `${album?.year ? `${album.year} • ` : ''}${album?.artist?.name || 'Альбом'}`, 
           image, 
           type: albumType,
           albumId: id,
@@ -52,7 +119,7 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
         });
       }
     } else {
-      openPlaylist({ title, artist: 'Your playlist', image, type });
+      openPlaylist({ title, artist: t('yourPlaylist'), image, type });
     }
   };
 
@@ -60,13 +127,18 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
     e.stopPropagation();
     
     // Для "Liked Songs" открываем плейлист
-    if (title === 'Liked Songs') {
+    if (title === LIKED_SONGS_KEY) {
       openPlaylist({
-        title: 'Liked Songs',
-        artist: 'Ваши любимые треки',
+        title: LIKED_SONGS_KEY,
+        artist: t('yourPlaylist'),
         image: '',
         type: 'liked',
       });
+      return;
+    }
+
+    if (type === 'dj') {
+      await startDjSession();
       return;
     }
     
@@ -111,7 +183,7 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
       if (type === 'artist') {
         openArtistView({ id, name: title });
       } else {
-        openPlaylist({ title, artist: 'Your playlist', image, type });
+        openPlaylist({ title, artist: t('yourPlaylist'), image, type });
       }
       return;
     }
@@ -139,8 +211,11 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
 
   // Get glow color based on playlist type - Spotify-style
   const getGlowColor = () => {
-    if (title === 'Liked Songs') {
+    if (title === LIKED_SONGS_KEY) {
       return 'linear-gradient(135deg, rgba(167, 139, 250, 0.25) 0%, rgba(236, 72, 153, 0.20) 100%)';
+    }
+    if (title === AI_DJ_PLAYLIST_NAME) {
+      return 'linear-gradient(135deg, rgba(34, 197, 94, 0.25) 0%, rgba(16, 185, 129, 0.20) 100%)';
     }
     if (title === 'This Is Yeat') {
       return 'linear-gradient(135deg, rgba(139, 92, 246, 0.25) 0%, rgba(99, 102, 241, 0.20) 100%)';
@@ -216,6 +291,16 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
                 >
                   <Heart className="w-5 h-5 sm:w-6 sm:h-6 text-white fill-white relative z-10" />
                 </div>
+              ) : type === 'dj' ? (
+                <div
+                  className="w-full h-full flex items-center justify-center relative overflow-hidden fast-transition gpu-accelerated"
+                  style={{
+                    background: 'linear-gradient(135deg, #22c55e 0%, #10b981 50%, #0ea5e9 100%)',
+                    transform: isHovered ? 'scale(1.08) translateZ(0)' : 'scale(1) translateZ(0)'
+                  }}
+                >
+                  <Radio className="w-6 h-6 sm:w-7 sm:h-7 text-white relative z-10" />
+                </div>
               ) : (
                 <img 
                   src={image} 
@@ -228,12 +313,12 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
               )}
               
               {/* Gradient overlay on hover */}
-              {type !== 'liked' && (
+              {type !== 'liked' && type !== 'dj' && (
                 <div 
                   className="absolute inset-0 fast-transition gpu-accelerated"
                   style={{
-                    background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%)',
-                    opacity: isHovered ? 0.5 : 0
+                    background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.1) 100%)',
+                    opacity: isHovered ? 0.65 : 0
                   }}
                 />
               )}
@@ -249,7 +334,7 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
               color: '#ffffff',
             }}
           >
-            {title}
+            {displayTitle}
           </p>
           {isPlaying && (
             <div 
@@ -265,12 +350,12 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
         {(title === 'Liked Songs') && (
         <motion.div
           className="flex-shrink-0 absolute right-2 z-20"
-          initial={{ opacity: 0, scale: 0 }}
-          animate={{
+          initial={animations ? { opacity: 0, scale: 0 } : false}
+          animate={animations ? {
               opacity: isHovered || isPlaying ? 1 : 0,
               scale: isHovered || isPlaying ? 1 : 0,
-          }}
-          transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+          } : { opacity: isHovered || isPlaying ? 1 : 0, scale: isHovered || isPlaying ? 1 : 0 }}
+          transition={animations ? { duration: 0.2, ease: [0.25, 0.1, 0.25, 1] } : { duration: 0 }}
           onClick={handlePlay}
         >
               <motion.button 
@@ -279,8 +364,8 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
                   background: '#1ED760',
                   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
                 }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={animations ? { scale: 1.05 } : {}}
+                whileTap={animations ? { scale: 0.95 } : {}}
               >
                 {isPlaying ? (
                   <Pause className="w-5 h-5 text-black fill-black" />

@@ -57,39 +57,3 @@ export function MusicVisualizer({ color = '#1ED760' }: MusicVisualizerProps) {
   );
 }
 
-// Animated Gradient Text Component
-interface AnimatedGradientTextProps {
-  children: string;
-  className?: string;
-}
-
-export function AnimatedGradientText({ children, className = '' }: AnimatedGradientTextProps) {
-  const { dominantColor, currentTrack } = usePlayer();
-
-  if (!currentTrack) {
-    return <span className={className}>{children}</span>;
-  }
-
-  return (
-    <motion.span
-      className={`${className} inline-block`}
-      style={{
-        backgroundImage: `linear-gradient(135deg, ${dominantColor}, white, ${dominantColor})`,
-        backgroundSize: '200% 200%',
-        WebkitBackgroundClip: 'text',
-        WebkitTextFillColor: 'transparent',
-        backgroundClip: 'text',
-      }}
-      animate={{
-        backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
-      }}
-      transition={{
-        duration: 5,
-        repeat: Infinity,
-        ease: 'linear',
-      }}
-    >
-      {children}
-    </motion.span>
-  );
-}

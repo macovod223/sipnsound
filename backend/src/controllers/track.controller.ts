@@ -442,6 +442,65 @@ export const unlikeTrack = asyncHandler(
   }
 );
 
+// POST /api/tracks/:id/play-history
+export const recordPlayHistory = asyncHandler(
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new AppError('User not authenticated', 401);
+    }
+
+    const { id } = req.params;
+
+    try {
+      const track = await prisma.track.findUnique({
+        where: { id },
+      });
+
+      if (!track) {
+        throw new AppError('Track not found', 404);
+      }
+
+      // Используем транзакцию для атомарности операций
+      await prisma.$transaction(async (tx) => {
+        // Записываем в историю прослушиваний
+        await tx.playHistory.create({
+          data: {
+            userId: req.user!.id,
+            trackId: id,
+          },
+        });
+
+        // Увеличиваем счетчик прослушиваний
+        await tx.track.update({
+          where: { id },
+          data: { playsCount: { increment: 1 } },
+        });
+      });
+
+      res.json({ message: 'Play history recorded' });
+    } catch (error: any) {
+      // Логируем ошибку для отладки
+      console.error('[PLAY_HISTORY] Error recording play history:', {
+        error: error.message,
+        stack: error.stack,
+        userId: req.user?.id,
+        trackId: id,
+      });
+      
+      // Если это ошибка Prisma, пробрасываем её дальше
+      if (error.code === 'P2002') {
+        // Unique constraint violation - возможно, запись уже существует
+        // Это не критично, просто игнорируем
+        res.json({ message: 'Play history already recorded' });
+        return;
+      }
+      
+      // Для других ошибок пробрасываем дальше
+      throw error;
+    }
+  }
+);
+
 // GET /api/tracks/file/:type/:filename
 export const streamLocalFile = asyncHandler(
   async (req: Request, res: Response) => {

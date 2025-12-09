@@ -31,7 +31,7 @@ export interface Playlist {
   title: string;
   artist: string;
   image: string;
-  type?: 'liked' | 'playlist' | 'album' | 'single';
+  type?: 'liked' | 'playlist' | 'album' | 'single' | 'dj';
   albumId?: string;
   albumType?: 'album' | 'single';
   returnTo?: 'playlists' | 'albums' | 'browse';
@@ -88,6 +88,8 @@ interface PlayerContextType {
   currentPlaylistTracks: Track[];
   setCurrentPlaylistTracks: (tracks: Track[]) => void;
   getNextTrackFromPlaylist: () => Track | null;
+  // Playback engine state
+  forcePlayNext: (track?: Track | null) => void;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
@@ -138,8 +140,19 @@ const normalizeLyricsInput = (raw: any): LyricLine[] => {
 };
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  const { t } = useSettings();
+  const { t, crossfade: crossfadeEnabled, crossfadeDuration, gapless } = useSettings();
   const { isAuthenticated } = useAuth();
+  
+  // Обёртка для записи истории прослушиваний
+  const recordPlayHistory = useCallback(async (trackId: string) => {
+    if (!isAuthenticated || !trackId) return;
+    try {
+      await apiClient.recordPlayHistory(trackId);
+    } catch (error) {
+      // Ошибки логируются в apiClient
+    }
+  }, [isAuthenticated]);
+  
   const [currentTrack, setCurrentTrackState] = useState<Track | null>(null);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [currentPlaylistName, setCurrentPlaylistName] = useState<string>('');
@@ -168,8 +181,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [currentPlaylistTracks, setCurrentPlaylistTracks] = useState<Track[]>([]);
   
   const timeIntervalRef = useRef<number | null>(null);
+  
+  // Два аудио-плеера для crossfade
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef2 = useRef<HTMLAudioElement | null>(null);
+  const activeAudioRef = useRef<'audio1' | 'audio2'>('audio1');
+  const isCrossfading = useRef(false);
+  const crossfadeAnimationRef = useRef<number | null>(null);
+  // Ref для хранения fromAudio во время кроссфейда, чтобы защитить его от изменений
+  const fromAudioRef = useRef<HTMLAudioElement | null>(null);
+  const fromAudioSrcRef = useRef<string>('');
+  
+  // Инициализируем audio элементы сразу при монтировании
+  if (!audioRef.current) {
+    audioRef.current = new Audio();
+    audioRef2.current = new Audio();
+  }
+  
   const lastVolumeToastRef = useRef<number>(60);
+  const volumeUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lyricsCacheRef = useRef<Map<string, LyricLine[]>>(new Map());
 
   const repeatRef = useRef(repeat);
@@ -179,49 +209,545 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const nextTrackRef = useRef<() => void>(() => {});
   const shouldAutoPlayRef = useRef(false);
-
+  const skipAudioLoadRef = useRef(false);
+  const gaplessNextTrackRef = useRef<Track | null>(null);
+  const gaplessEnabledRef = useRef(gapless);
+  const gaplessPreparedTrackIdRef = useRef<string | null>(null);
+  // Ref для хранения последнего значения currentTime (для синхронизации при play)
+  const lastSeekedTimeRef = useRef<number>(0);
+  const crossfadeDurationRef = useRef<number>(crossfadeDuration);
   useEffect(() => {
-    const audio = new Audio();
-    audioRef.current = audio;
+    gaplessEnabledRef.current = gapless;
+    if (!gapless) {
+      gaplessNextTrackRef.current = null;
+      gaplessPreparedTrackIdRef.current = null;
+    }
+  }, [gapless]);
+  useEffect(() => {
+    crossfadeDurationRef.current = crossfadeDuration;
+  }, [crossfadeDuration]);
 
-    const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
-    };
-
-    const handleLoadedMetadata = () => {
-      if (!Number.isNaN(audio.duration) && audio.duration > 0) {
-        setDuration(audio.duration);
-      }
-    };
-
-    const handleEnded = () => {
-      if (repeatRef.current && audioRef.current) {
-        audio.currentTime = 0;
-        audio.play().catch(() => setIsPlaying(false));
-      } else {
-        nextTrackRef.current();
-      }
-    };
-
-    const handleError = () => {
-      setIsPlaying(false);
-    };
-
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-    audio.addEventListener('ended', handleEnded);
-    audio.addEventListener('error', handleError);
-
-    return () => {
-      audio.pause();
-      audio.src = '';
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      audio.removeEventListener('ended', handleEnded);
-      audio.removeEventListener('error', handleError);
-      audioRef.current = null;
-    };
+  // Получаем активный аудио-элемент
+  const getActiveAudio = useCallback(() => {
+    return activeAudioRef.current === 'audio1' ? audioRef.current : audioRef2.current;
   }, []);
+
+  const getInactiveAudio = useCallback(() => {
+    return activeAudioRef.current === 'audio1' ? audioRef2.current : audioRef.current;
+  }, []);
+
+  const cancelCrossfade = useCallback(() => {
+    if (crossfadeAnimationRef.current) {
+      // Может быть как requestAnimationFrame, так и setInterval
+      if (typeof crossfadeAnimationRef.current === 'number') {
+        // Это setInterval ID
+        clearInterval(crossfadeAnimationRef.current);
+      } else {
+        // Это requestAnimationFrame ID (на случай, если где-то еще используется)
+      cancelAnimationFrame(crossfadeAnimationRef.current);
+      }
+      crossfadeAnimationRef.current = null;
+    }
+    isCrossfading.current = false;
+
+    const targetVolume = volume / 100;
+    const activeAudio = getActiveAudio();
+    const inactiveAudio = getInactiveAudio();
+
+    if (inactiveAudio) {
+      inactiveAudio.pause();
+      inactiveAudio.src = '';
+      inactiveAudio.currentTime = 0;
+      inactiveAudio.volume = targetVolume;
+    }
+
+    if (activeAudio) {
+      activeAudio.volume = targetVolume;
+    }
+  }, [getActiveAudio, getInactiveAudio, volume]);
+
+  const prepareInactiveForTrack = useCallback((track: Track) => {
+    const inactiveAudio = getInactiveAudio();
+    if (!inactiveAudio || !track.audioUrl) return false;
+    inactiveAudio.src = track.audioUrl;
+    inactiveAudio.currentTime = 0;
+    inactiveAudio.volume = 0;
+    inactiveAudio.preload = 'auto';
+    gaplessPreparedTrackIdRef.current = track.id || `${track.title}-${track.artist}`;
+    try {
+      inactiveAudio.load();
+    } catch {
+      // ignore
+    }
+    return true;
+  }, [getInactiveAudio]);
+
+  // Функция для плавного crossfade между треками
+  const performCrossfade = useCallback((fromAudio: HTMLAudioElement, toAudio: HTMLAudioElement, duration: number, onDone: () => void) => {
+    cancelCrossfade();
+    
+    const targetVolume = volume / 100;
+    const safeDuration = Math.max(0, Number(duration) || 0);
+
+
+    // Если duration == 0, просто моментально переключаемся
+    if (safeDuration === 0) {
+      fromAudio.pause();
+      toAudio.volume = targetVolume;
+      activeAudioRef.current = activeAudioRef.current === 'audio1' ? 'audio2' : 'audio1';
+      onDone();
+      return;
+    }
+
+    isCrossfading.current = true;
+    const startFromVolume = fromAudio.volume;
+    // Сохраняем оригинальный src для восстановления
+    const originalFromAudioSrc = fromAudio.src || fromAudioSrcRef.current;
+    // Убеждаемся, что toAudio начинается с 0
+    toAudio.volume = 0;
+    
+    let lastUpdateTime = 0;
+    
+    // Используем setInterval вместо requestAnimationFrame для более простого управления
+    const updateInterval = 50; // 50ms = 20 раз в секунду
+    const startInterval = Date.now();
+    
+    const intervalId = setInterval(() => {
+      if (!isCrossfading.current) {
+        clearInterval(intervalId);
+        return;
+      }
+      
+      const elapsed = (Date.now() - startInterval) / 1000;
+      const progress = Math.min(elapsed / safeDuration, 1);
+      
+      // ВАЖНО: Проверяем и восстанавливаем fromAudio, если он потерял src или паузился
+      if (progress < 0.95 && isCrossfading.current) {
+        // Восстанавливаем src, если он потерялся
+        if (!fromAudio.src || fromAudio.src === window.location.href || fromAudio.src.endsWith('/')) {
+          if (originalFromAudioSrc && originalFromAudioSrc !== window.location.href && !originalFromAudioSrc.endsWith('/')) {
+            fromAudio.src = originalFromAudioSrc;
+            try {
+              fromAudio.load();
+              // Пытаемся возобновить воспроизведение после загрузки
+              if (fromAudio.readyState >= 2) {
+                fromAudio.play().catch(() => {});
+              }
+            } catch (e) {
+              // Игнорируем ошибки загрузки
+            }
+          }
+        }
+        
+        // Возобновляем воспроизведение, если fromAudio паузился
+        if (fromAudio.paused && fromAudio.src && fromAudio.src !== window.location.href && !fromAudio.src.endsWith('/')) {
+          if (fromAudio.readyState >= 2) {
+            fromAudio.play().catch(() => {
+              // Игнорируем ошибки воспроизведения
+            });
+          }
+        }
+      }
+      
+      // Обновляем громкость: сумма должна быть равна targetVolume (100%)
+      const newFromVolume = startFromVolume * (1 - progress);
+      const newToVolume = targetVolume * progress;
+      fromAudio.volume = newFromVolume;
+      toAudio.volume = newToVolume;
+      
+      
+      // Обновляем UI во время кроссфейда - показываем прогресс нового трека
+      // Обновляем каждые 0.05 секунды для плавности
+      if (elapsed - lastUpdateTime >= 0.05) {
+        lastUpdateTime = elapsed;
+        const newTime = toAudio.currentTime || 0;
+        setCurrentTime(newTime);
+        if (toAudio.duration && !Number.isNaN(toAudio.duration) && toAudio.duration > 0) {
+          setDuration(toAudio.duration);
+        }
+      }
+      
+      if (progress >= 1 || !isCrossfading.current) {
+        clearInterval(intervalId);
+        crossfadeAnimationRef.current = null;
+        // НЕ паузим fromAudio сразу - пусть он продолжает играть до полного затухания
+        // fromAudio.pause() будет вызван в onDone после обновления состояния
+        fromAudio.volume = 0;
+        toAudio.volume = targetVolume;
+        isCrossfading.current = false;
+        // activeAudioRef уже переключен до начала кроссфейда
+        onDone();
+      }
+    }, updateInterval);
+    
+    crossfadeAnimationRef.current = intervalId as any;
+  }, [cancelCrossfade, volume]);
+
+  // Получение следующего трека для crossfade
+  const getNextTrackForCrossfade = useCallback(() => {
+    // Приоритет: очередь, затем плейлист/шафл, затем API
+    if (queue.length > 0) {
+      return queue[0];
+    }
+
+    const tracks = shuffle && shuffledPlaylist.length > 0 
+      ? shuffledPlaylist 
+      : currentPlaylistTracks.length > 0 
+        ? currentPlaylistTracks 
+        : apiTracks;
+    
+    if (tracks.length === 0) {
+      return null;
+    }
+    
+    const currentIdx = shuffle && shuffledPlaylist.length > 0
+      ? shuffledPlaylistIndex
+      : currentTrackIndex;
+    
+    const nextIdx = currentIdx + 1;
+    const nextTrack = nextIdx < tracks.length ? tracks[nextIdx] : null;
+    return nextTrack;
+  }, [apiTracks, currentPlaylistTracks, currentTrackIndex, shuffle, shuffledPlaylist, shuffledPlaylistIndex, queue]);
+
+  // Запуск crossfade к следующему треку
+  const startCrossfadeToNextTrack = useCallback((currentAudio: HTMLAudioElement, nextTrack: Track, fadeSeconds: number) => {
+    
+    const inactiveAudio = getInactiveAudio();
+    if (!inactiveAudio) {
+      console.error('[CROSSFADE] No inactive audio');
+      return;
+    }
+    if (!nextTrack.audioUrl) {
+      console.error('[CROSSFADE] No audioUrl');
+      return;
+    }
+    if (isCrossfading.current) {
+      return;
+    }
+    
+    cancelCrossfade();
+    
+    // Подготавливаем неактивный аудио для следующего трека
+    if (!prepareInactiveForTrack(nextTrack)) {
+      console.error('[CROSSFADE] Failed to prepare inactive audio');
+      return;
+    }
+    
+    // Устанавливаем начальную громкость для следующего трека
+    inactiveAudio.volume = 0;
+    
+    // ВАЖНО: устанавливаем флаги кроссфейда САМЫМ ПЕРВЫМ, до любых других операций
+    // Это предотвратит вмешательство useEffect в процесс кроссфейда
+        skipAudioLoadRef.current = true;
+    isCrossfading.current = true;
+    
+    // Сохраняем ссылку на fromAudio (старое активное аудио) ДО любых изменений
+    // Это гарантирует, что мы сможем продолжить его воспроизведение
+    const fromAudio = currentAudio;
+    // Сохраняем в ref для защиты от изменений
+    fromAudioRef.current = fromAudio;
+    fromAudioSrcRef.current = fromAudio.src;
+    
+    
+    // Функция для начала воспроизведения и кроссфейда
+    let playbackStarted = false;
+    const startPlayback = () => {
+      if (playbackStarted) {
+        return;
+      }
+      playbackStarted = true;
+      
+      // Проверяем настройку gapless: если она выключена, не запускаем трек автоматически при кроссфейде
+      // Но если она включена, запускаем автоматически
+      if (!gapless) {
+        // Не запускаем трек автоматически, но все равно продолжаем кроссфейд
+        // (старый трек будет затухать, новый будет на паузе)
+        // Переключаем активный аудио элемент
+        activeAudioRef.current = activeAudioRef.current === 'audio1' ? 'audio2' : 'audio1';
+        
+        // ВАЖНО: НЕ обновляем currentTrack во время кроссфейда!
+        // Обновим currentTrack только ПОСЛЕ завершения кроссфейда
+        
+        // Запускаем кроссфейд (старый трек затухает, новый остается на паузе)
+        performCrossfade(fromAudio, inactiveAudio, fadeSeconds, async () => {
+          // ТЕПЕРЬ обновляем currentTrack ПОСЛЕ завершения кроссфейда
+          // Сначала проверяем, загружены ли lyrics
+          let normalizedLyrics = normalizeLyricsInput(nextTrack.lyrics);
+          
+          // Если lyrics не загружены, пытаемся загрузить их
+          if (!normalizedLyrics.length && nextTrack.id) {
+            // Проверяем кеш
+            if (lyricsCacheRef.current.has(nextTrack.id)) {
+              normalizedLyrics = lyricsCacheRef.current.get(nextTrack.id) || [];
+            } else {
+              // Загружаем lyrics асинхронно
+              try {
+                const response = await apiClient.getTrackLyrics(nextTrack.id);
+                const parsed = normalizeLyricsInput(response?.lyrics);
+                if (parsed.length) {
+                  lyricsCacheRef.current.set(nextTrack.id, parsed);
+                  normalizedLyrics = parsed;
+                }
+              } catch (error) {
+                // Игнорируем ошибки загрузки lyrics
+              }
+            }
+          }
+          
+          const coverImage = typeof nextTrack.image === 'string' && nextTrack.image.trim().length
+            ? nextTrack.image
+            : FALLBACK_TRACK_IMAGE;
+          const trackWithLyrics = {
+            ...nextTrack,
+            image: coverImage,
+            lyrics: normalizedLyrics,
+            duration: nextTrack.duration || 225,
+            playlistTitle: currentPlaylistName || nextTrack.playlistTitle,
+          };
+          setCurrentTrackState(trackWithLyrics);
+          
+          const newCurrentTime = inactiveAudio.currentTime || 0;
+          const newDuration = !Number.isNaN(inactiveAudio.duration) && inactiveAudio.duration > 0 
+            ? inactiveAudio.duration 
+            : (nextTrack.duration || 225);
+          
+          // Паузим старый трек
+          fromAudio.pause();
+          fromAudio.volume = 0;
+          
+          // Новый трек остается на паузе (gapless выключен)
+          setCurrentTime(newCurrentTime);
+          setDuration(newDuration);
+          setIsPlaying(false);
+          
+          // Сбрасываем флаги кроссфейда
+          fromAudioRef.current = null;
+          fromAudioSrcRef.current = '';
+          
+          setTimeout(() => {
+            isCrossfading.current = false;
+          }, 100);
+          
+          setTimeout(() => {
+            skipAudioLoadRef.current = false;
+          }, 500);
+        });
+        return;
+      }
+      
+      // Если gapless включен, запускаем трек автоматически
+      inactiveAudio.play().then(() => {
+        
+        // ВАЖНО: НЕ обновляем currentTrack во время кроссфейда!
+        // Это предотвратит срабатывание useEffect, который может сбросить fromAudio.src
+        // Обновим currentTrack только ПОСЛЕ завершения кроссфейда
+        
+        // Переключаем activeAudioRef для UI
+        activeAudioRef.current = activeAudioRef.current === 'audio1' ? 'audio2' : 'audio1';
+        // Устанавливаем isPlaying в true СРАЗУ
+        setIsPlaying(true);
+        
+        // Запускаем кроссфейд
+        performCrossfade(fromAudio, inactiveAudio, fadeSeconds, async () => {
+          
+          // ТЕПЕРЬ обновляем currentTrack ПОСЛЕ завершения кроссфейда
+          // Сначала проверяем, загружены ли lyrics
+          let normalizedLyrics = normalizeLyricsInput(nextTrack.lyrics);
+          
+          // Если lyrics не загружены, пытаемся загрузить их
+          if (!normalizedLyrics.length && nextTrack.id) {
+            // Проверяем кеш
+            if (lyricsCacheRef.current.has(nextTrack.id)) {
+              normalizedLyrics = lyricsCacheRef.current.get(nextTrack.id) || [];
+            } else {
+              // Загружаем lyrics асинхронно
+              try {
+                const response = await apiClient.getTrackLyrics(nextTrack.id);
+                const parsed = normalizeLyricsInput(response?.lyrics);
+                if (parsed.length) {
+                  lyricsCacheRef.current.set(nextTrack.id, parsed);
+                  normalizedLyrics = parsed;
+                }
+              } catch (error) {
+                // Игнорируем ошибки загрузки lyrics
+              }
+            }
+          }
+          
+          const coverImage = typeof nextTrack.image === 'string' && nextTrack.image.trim().length
+            ? nextTrack.image
+            : FALLBACK_TRACK_IMAGE;
+          const trackWithLyrics = {
+            ...nextTrack,
+            image: coverImage,
+            lyrics: normalizedLyrics,
+            duration: nextTrack.duration || 225,
+            playlistTitle: currentPlaylistName || nextTrack.playlistTitle,
+          };
+          
+          // Обновляем состояние трека ПОСЛЕ завершения кроссфейда
+          setCurrentTrackState(trackWithLyrics);
+          
+          // После завершения кроссфейда обновляем состояние
+          const newCurrentTime = inactiveAudio.currentTime || 0;
+          const newDuration = !Number.isNaN(inactiveAudio.duration) && inactiveAudio.duration > 0 
+            ? inactiveAudio.duration 
+            : (nextTrack.duration || 225);
+          
+          // Паузим старый трек
+          fromAudio.pause();
+          fromAudio.volume = 0;
+          
+          // Убеждаемся, что новый трек продолжает воспроизводиться
+          if (inactiveAudio.paused) {
+            inactiveAudio.play().catch(() => {
+              // Игнорируем ошибки
+            });
+          }
+          
+          // Устанавливаем финальное время и длительность
+          setCurrentTime(newCurrentTime);
+          setDuration(newDuration);
+          setIsPlaying(true);
+          
+          // Дополнительно убеждаемся, что активный аудио элемент воспроизводится
+          const finalActiveAudio = getActiveAudio();
+          if (finalActiveAudio && finalActiveAudio.paused) {
+            finalActiveAudio.play().catch(() => {
+              // Игнорируем ошибки
+            });
+          }
+          
+          // Сбрасываем флаги кроссфейда
+          fromAudioRef.current = null;
+          fromAudioSrcRef.current = '';
+          
+          setTimeout(() => {
+            isCrossfading.current = false;
+          }, 100);
+          
+          setTimeout(() => {
+            skipAudioLoadRef.current = false;
+          }, 500);
+      });
+    }).catch((error) => {
+        console.error('[CROSSFADE] Playback error:', error);
+      isCrossfading.current = false;
+      fromAudioRef.current = null;
+      fromAudioSrcRef.current = '';
+        cancelCrossfade();
+        // fallback: переключаемся обычным способом
+      setCurrentTrack(nextTrack, currentPlaylistName);
+      setIsPlaying(true);
+    });
+  };
+    
+    // Проверяем готовность трека перед воспроизведением
+    if (inactiveAudio.readyState >= 2) {
+      startPlayback();
+    } else {
+      const handleCanPlay = () => {
+        startPlayback();
+        inactiveAudio.removeEventListener('canplay', handleCanPlay);
+        inactiveAudio.removeEventListener('loadeddata', handleLoadedData);
+      };
+      
+      const handleLoadedData = () => {
+        if (inactiveAudio.readyState >= 2) {
+          startPlayback();
+          inactiveAudio.removeEventListener('canplay', handleCanPlay);
+          inactiveAudio.removeEventListener('loadeddata', handleLoadedData);
+        }
+      };
+      
+      inactiveAudio.addEventListener('canplay', handleCanPlay, { once: true });
+      inactiveAudio.addEventListener('loadeddata', handleLoadedData, { once: true });
+      
+      // Фолбэк таймаут
+      setTimeout(() => {
+        if (inactiveAudio.readyState >= 2) {
+          startPlayback();
+        }
+        inactiveAudio.removeEventListener('canplay', handleCanPlay);
+        inactiveAudio.removeEventListener('loadeddata', handleLoadedData);
+      }, 1000);
+    }
+  }, [getInactiveAudio, prepareInactiveForTrack, volume, cancelCrossfade, performCrossfade, currentPlaylistName, shuffle, shuffledPlaylist, apiTracks, currentPlaylistTracks, likedTracksList, gapless]);
+
+
+  // Отдельный useEffect для мониторинга crossfade
+  useEffect(() => {
+    if (!crossfadeEnabled) {
+      return;
+    }
+    if (!currentTrack?.audioUrl) {
+      return;
+    }
+    if (isCrossfading.current) {
+      return;
+    }
+    if (!isPlaying) {
+      return;
+    }
+    
+    const activeAudio = getActiveAudio();
+    if (!activeAudio) {
+      return;
+    }
+    if (activeAudio.duration <= 0 || Number.isNaN(activeAudio.duration)) {
+      return;
+    }
+    
+    const timeRemaining = activeAudio.duration - currentTime;
+    
+    // Получаем значение из слайдера (1-12 секунд)
+    const rawFade = Math.max(0, Number(crossfadeDuration) || 0);
+    
+    // Адаптивный фейд: не длиннее трека и не короче 1 сек (минимум 1, максимум 12)
+    const maxFade = Math.max(1, activeAudio.duration - 0.25);
+    const fadeSeconds = Math.min(Math.max(1, rawFade), maxFade);
+    
+    // Запускаем кроссфейд когда осталось времени <= fadeSeconds
+    // Добавляем небольшой буфер (0.1 сек) чтобы не пропустить момент
+    // Проверяем что мы еще не запускали кроссфейд для этого трека
+    if (timeRemaining > 0 && fadeSeconds > 0 && timeRemaining <= fadeSeconds + 0.1 && timeRemaining > fadeSeconds - 0.2) {
+      const nextTrack = getNextTrackForCrossfade();
+      if (nextTrack && nextTrack.audioUrl) {
+        // Используем реальное значение из слайдера, адаптированное под длительность трека
+        startCrossfadeToNextTrack(activeAudio, nextTrack, fadeSeconds);
+      }
+    }
+  }, [currentTime, crossfadeEnabled, crossfadeDuration, currentTrack, isPlaying, getActiveAudio, getNextTrackForCrossfade, startCrossfadeToNextTrack]);
+
+  // Gapless предзагрузка следующего трека (если crossfade выключен)
+  useEffect(() => {
+    if (crossfadeEnabled || !gaplessEnabledRef.current || !isPlaying) {
+      gaplessNextTrackRef.current = null;
+      gaplessPreparedTrackIdRef.current = null;
+      return;
+    }
+
+    const activeAudio = getActiveAudio();
+    if (!activeAudio || activeAudio.duration <= 0) return;
+
+    const timeRemaining = activeAudio.duration - currentTime;
+    if (timeRemaining <= 1.2) {
+      const nextTrack = getNextTrackForCrossfade();
+      if (nextTrack && nextTrack.audioUrl) {
+        const nextId = nextTrack.id || `${nextTrack.title}-${nextTrack.artist}`;
+        if (gaplessPreparedTrackIdRef.current === nextId) return;
+        if (prepareInactiveForTrack(nextTrack)) {
+          gaplessNextTrackRef.current = nextTrack;
+          gaplessPreparedTrackIdRef.current = nextId;
+        }
+      }
+    }
+  }, [currentTime, crossfadeEnabled, isPlaying, getActiveAudio, getInactiveAudio, getNextTrackForCrossfade, prepareInactiveForTrack]);
+
+  // Сбрасываем подготовленный gapless при смене текущего трека
+  useEffect(() => {
+    gaplessNextTrackRef.current = null;
+  }, [currentTrack?.id]);
 
   // Загрузка лайкнутых треков из API
   const loadLikedTracks = useCallback(async () => {
@@ -270,32 +796,32 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setIsLoadingTracks(true);
     try {
       const response = await apiClient.getTracks({ includeAll: true });
-      if (response && response.tracks && response.tracks.length > 0) {
-        const formattedTracks: Track[] = response.tracks.map((apiTrack: any) => ({
-          id: apiTrack.id,
-          title: apiTrack.title,
-          artist: apiTrack.artist?.name || 'Unknown Artist',
-          image:
-            resolveMediaPath(
-              apiTrack.coverUrl ||
-                apiTrack.coverPath ||
-                apiTrack.album?.coverUrl ||
-                apiTrack.album?.coverPath
-            ) || FALLBACK_TRACK_IMAGE,
-          genre: apiTrack.genre?.name || 'Unknown',
-          duration: apiTrack.duration,
-          lyrics: normalizeLyricsInput(apiTrack.lyrics),
-          playlistTitle: 'API Tracks',
-          audioUrl: resolveMediaPath(apiTrack.audioUrl || apiTrack.audioPath),
-          lyricsUrl: undefined,
-          playsCount: apiTrack.playsCount ?? 0,
-          album: apiTrack.album?.title || 'Unknown Album',
-        }));
-        setApiTracks(formattedTracks);
-      }
+      const apiList = response?.tracks || [];
+      const formattedTracks: Track[] = apiList.map((apiTrack: any) => ({
+        id: apiTrack.id,
+        title: apiTrack.title,
+        artist: apiTrack.artist?.name || 'Unknown Artist',
+        image:
+          resolveMediaPath(
+            apiTrack.coverUrl ||
+              apiTrack.coverPath ||
+              apiTrack.album?.coverUrl ||
+              apiTrack.album?.coverPath
+          ) || FALLBACK_TRACK_IMAGE,
+        genre: apiTrack.genre?.name || 'Unknown',
+        duration: apiTrack.duration,
+        lyrics: normalizeLyricsInput(apiTrack.lyrics),
+        playlistTitle: 'API Tracks',
+        audioUrl: resolveMediaPath(apiTrack.audioUrl || apiTrack.audioPath),
+        lyricsUrl: undefined,
+        playsCount: apiTrack.playsCount ?? 0,
+        album: apiTrack.album?.title || 'Unknown Album',
+      }));
+      setApiTracks(formattedTracks);
     } catch (error) {
       console.error('Error loading tracks from API:', error);
-      toast.error('Ошибка загрузки треков');
+      // Не показываем тост на главной, просто оставляем пустой список
+      setApiTracks([]);
     } finally {
       setIsLoadingTracks(false);
     }
@@ -383,66 +909,419 @@ const hydrateTrackDetails = useCallback(
   [patchCurrentTrack, fetchLyricsForTrack]
 );
 
+    // Управление активным аудио: загрузка src
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) {
+      // ВАЖНО: проверяем флаги кроссфейда САМЫМ ПЕРВЫМ, до любых других проверок
+      if (skipAudioLoadRef.current || isCrossfading.current) {
+        // Пропускаем загрузку при кроссфейде/gapless - флаг будет сброшен после завершения
+      return;
+    }
+    
+    // ВАЖНО: во время кроссфейда не меняем src у fromAudio (старого активного аудио)
+    // fromAudio должен продолжать играть со своим старым src
+    const activeAudio = getActiveAudio();
+    if (!activeAudio) {
+        // Если аудио еще не инициализировано, ждем
+        return;
+      }
+    
+    // ВАЖНО: Если activeAudio является fromAudio во время кроссфейда, не трогаем его
+    // Проверяем напрямую по ссылке на элемент
+    if (fromAudioRef.current && (activeAudio === fromAudioRef.current || 
+        (fromAudioRef.current === audioRef.current && activeAudio === audioRef.current) ||
+        (fromAudioRef.current === audioRef2.current && activeAudio === audioRef2.current))) {
       return;
     }
 
     if (currentTrack?.audioUrl) {
-      // Проверяем, изменился ли трек (новый URL)
-      const isNewTrack = audio.src !== currentTrack.audioUrl;
-      
-      if (isNewTrack) {
-      audio.src = currentTrack.audioUrl;
-      audio.volume = volume / 100;
+        // Проверяем, нужно ли обновить src
+        const currentSrc = activeAudio.src || '';
+        const newSrc = currentTrack.audioUrl;
         
-        // Сбрасываем время только если установлен флаг автоматического включения (стрелка вправо)
+        // Сравниваем URL без протокола для надежности
+        const normalizeUrl = (url: string) => url.replace(/^https?:\/\//, '').split('?')[0];
+        const isNewTrack = normalizeUrl(currentSrc) !== normalizeUrl(newSrc);
+        
+        if (isNewTrack || !currentSrc) {
+          // Останавливаем текущее воспроизведение перед сменой трека
+          // (isCrossfading уже проверен в начале useEffect)
+          activeAudio.pause();
+        activeAudio.src = newSrc;
+        // Устанавливаем громкость сразу, но не меняем volume в этом useEffect
+        // volume обрабатывается отдельным useEffect
+        activeAudio.volume = volume / 100;
+        setCurrentTime(0);
+        
+        // Загружаем новый трек
+        activeAudio.load();
+        
+        // Если нужно автоплеить, обрабатываем сразу после load()
+        // Проверяем только флаг автоплея - он устанавливается в setCurrentTrack синхронно
         if (shouldAutoPlayRef.current) {
-          shouldAutoPlayRef.current = false;
-      audio.currentTime = 0;
-          // Устанавливаем флаг для автоматического включения
+          let playbackStarted = false;
+          
+          // Нормализуем URL для сравнения (убираем протокол и домен)
+          const normalizeUrlForCompare = (url: string) => {
+            if (!url) return '';
+            // Убираем протокол и домен, оставляем только путь
+            return url.replace(/^https?:\/\/[^\/]+/, '').split('?')[0];
+          };
+          
+          const startAutoplay = () => {
+            // Проверяем что флаг еще актуален, src правильный и воспроизведение еще не начато
+            if (playbackStarted) {
+              return;
+            }
+            if (!shouldAutoPlayRef.current) {
+              return;
+            }
+            // Сравниваем нормализованные URL (activeAudio.src может быть полным URL, newSrc - относительным)
+            const normalizedSrc = normalizeUrlForCompare(activeAudio.src);
+            const normalizedNewSrc = normalizeUrlForCompare(newSrc);
+            if (normalizedSrc !== normalizedNewSrc) {
+              return;
+            }
+            
+            playbackStarted = true;
+          // НЕ сбрасываем currentTime - он уже установлен правильно (либо из seek, либо из предыдущего воспроизведения)
+          // activeAudio.currentTime = 0; // Убрано - не сбрасываем при автоплее
+            activeAudio.play()
+              .then(() => {
           setIsPlaying(true);
+                shouldAutoPlayRef.current = false;
+                if (activeAudio.duration && !Number.isNaN(activeAudio.duration)) {
+                  setDuration(activeAudio.duration);
+                }
+              })
+              .catch((error) => {
+                console.error('[AUTOPLAY] Playback error:', error);
+                setIsPlaying(false);
+                shouldAutoPlayRef.current = false;
+                playbackStarted = false; // Разрешаем повторную попытку
+              });
+          };
+          
+          // После load() readyState всегда сбрасывается в 0, поэтому всегда ждем события
+          // Но также пробуем запустить сразу если уже готово (на случай если событие уже сработало)
+          if (activeAudio.readyState >= 2) {
+            startAutoplay();
+          } else {
+            // Ждем готовности - используем canplay для быстрого старта
+            const handleCanPlay = () => {
+              startAutoplay();
+              activeAudio.removeEventListener('canplay', handleCanPlay);
+              activeAudio.removeEventListener('loadeddata', handleLoadedData);
+            };
+            
+            const handleLoadedData = () => {
+              // Проверяем что src совпадает перед запуском
+              const normalizedSrc = normalizeUrlForCompare(activeAudio.src);
+              const normalizedNewSrc = normalizeUrlForCompare(newSrc);
+              if (activeAudio.readyState >= 2 && normalizedSrc === normalizedNewSrc) {
+                startAutoplay();
+                activeAudio.removeEventListener('canplay', handleCanPlay);
+                activeAudio.removeEventListener('loadeddata', handleLoadedData);
+              }
+            };
+            
+            activeAudio.addEventListener('canplay', handleCanPlay, { once: true });
+            activeAudio.addEventListener('loadeddata', handleLoadedData, { once: true });
+            
+            // Фолбэк таймаут
+            const fallbackTimeout = setTimeout(() => {
+              const normalizedSrc = normalizeUrlForCompare(activeAudio.src);
+              const normalizedNewSrc = normalizeUrlForCompare(newSrc);
+              const srcMatch = normalizedSrc === normalizedNewSrc;
+              if (!playbackStarted && shouldAutoPlayRef.current && activeAudio.readyState >= 2 && srcMatch) {
+                startAutoplay();
+              }
+              activeAudio.removeEventListener('canplay', handleCanPlay);
+              activeAudio.removeEventListener('loadeddata', handleLoadedData);
+            }, 500);
+            
+            // Очистка при размонтировании
+            return () => {
+              clearTimeout(fallbackTimeout);
+              activeAudio.removeEventListener('canplay', handleCanPlay);
+              activeAudio.removeEventListener('loadeddata', handleLoadedData);
+            };
+          }
+        }
+      } else {
+        // Тот же трек, только обновляем громкость
+        // Не вызываем load() или pause() - просто меняем volume
+        activeAudio.volume = volume / 100;
       }
-        // Play/pause обрабатывается отдельным useEffect
-      }
-      // Volume обрабатывается отдельным useEffect, не обновляем здесь
     } else {
-      audio.pause();
-      audio.src = '';
+      activeAudio.pause();
+      activeAudio.src = '';
       setCurrentTime(0);
-      if (currentTrack?.duration) {
-        setDuration(currentTrack.duration);
-      }
+      if (currentTrack?.duration) setDuration(currentTrack.duration);
     }
-  }, [currentTrack?.audioUrl]); 
+  }, [currentTrack?.audioUrl, getActiveAudio, volume]);
 
+  // Отдельный useEffect для автоплея - гарантирует запуск при переключении треков
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !currentTrack?.audioUrl) {
+    if (!shouldAutoPlayRef.current) return;
+    
+    const activeAudio = getActiveAudio();
+    if (!activeAudio || !currentTrack?.audioUrl) return;
+    
+    // Пропускаем если идет кроссфейд или пропуск загрузки
+    if (isCrossfading.current || skipAudioLoadRef.current) return;
+    
+    const startAutoplay = () => {
+      if (!shouldAutoPlayRef.current) return; // Проверяем что флаг еще актуален
+      
+      if (activeAudio.readyState >= 2) {
+        // Аудио готово - запускаем сразу
+        // НЕ сбрасываем currentTime - он уже установлен правильно (либо из seek, либо из предыдущего воспроизведения)
+        // activeAudio.currentTime = 0; // Убрано - не сбрасываем при автоплее
+        activeAudio.play()
+          .then(() => {
+            setIsPlaying(true);
+            shouldAutoPlayRef.current = false;
+            if (activeAudio.duration && !Number.isNaN(activeAudio.duration)) {
+              setDuration(activeAudio.duration);
+            }
+            // Записываем в историю прослушиваний при начале воспроизведения
+            if (currentTrack?.id && activeAudio.currentTime < 1 && isAuthenticated) {
+              recordPlayHistory(currentTrack.id).catch((err: unknown) => {
+                console.error('[PLAY_HISTORY] Failed to record:', err);
+              });
+            }
+          })
+          .catch((error) => {
+            console.error('Autoplay error:', error);
+            setIsPlaying(false);
+            shouldAutoPlayRef.current = false;
+          });
+      } else {
+        // Ждем готовности
+        const handleCanPlay = () => {
+          if (!shouldAutoPlayRef.current) return;
+          // НЕ сбрасываем currentTime - он уже установлен правильно (либо из seek, либо из предыдущего воспроизведения)
+          // activeAudio.currentTime = 0; // Убрано - не сбрасываем при автоплее
+          activeAudio.play()
+            .then(() => {
+              setIsPlaying(true);
+              shouldAutoPlayRef.current = false;
+              if (activeAudio.duration && !Number.isNaN(activeAudio.duration)) {
+                setDuration(activeAudio.duration);
+              }
+              // Записываем в историю прослушиваний при начале воспроизведения
+              if (currentTrack?.id && activeAudio.currentTime < 1 && isAuthenticated) {
+                recordPlayHistory(currentTrack.id).catch(err => {
+                  console.error('[PLAY_HISTORY] Failed to record:', err);
+                });
+              }
+            })
+            .catch((error) => {
+              console.error('Autoplay error:', error);
+              setIsPlaying(false);
+              shouldAutoPlayRef.current = false;
+            });
+          activeAudio.removeEventListener('canplay', handleCanPlay);
+          activeAudio.removeEventListener('loadeddata', handleLoadedData);
+        };
+        
+        const handleLoadedData = () => {
+          if (activeAudio.readyState >= 2 && shouldAutoPlayRef.current) {
+            handleCanPlay();
+          }
+        };
+        
+        activeAudio.addEventListener('canplay', handleCanPlay, { once: true });
+        activeAudio.addEventListener('loadeddata', handleLoadedData, { once: true });
+        
+        // Фолбэк таймаут
+        const fallbackTimeout = setTimeout(() => {
+          if (shouldAutoPlayRef.current && activeAudio.readyState >= 2 && activeAudio.src === currentTrack.audioUrl) {
+            // НЕ сбрасываем currentTime - он уже установлен правильно (либо из seek, либо из предыдущего воспроизведения)
+            // activeAudio.currentTime = 0; // Убрано - не сбрасываем при автоплее
+            activeAudio.play()
+              .then(() => {
+                setIsPlaying(true);
+                shouldAutoPlayRef.current = false;
+                // Записываем в историю прослушиваний при начале воспроизведения
+                if (currentTrack?.id && activeAudio.currentTime < 1 && isAuthenticated) {
+                  recordPlayHistory(currentTrack.id).catch(err => {
+                    console.error('[PLAY_HISTORY] Failed to record:', err);
+                  });
+                }
+              })
+              .catch(() => {
+                setIsPlaying(false);
+                shouldAutoPlayRef.current = false;
+              });
+          }
+          activeAudio.removeEventListener('canplay', handleCanPlay);
+          activeAudio.removeEventListener('loadeddata', handleLoadedData);
+        }, 500);
+        
+        return () => {
+          clearTimeout(fallbackTimeout);
+          activeAudio.removeEventListener('canplay', handleCanPlay);
+          activeAudio.removeEventListener('loadeddata', handleLoadedData);
+        };
+      }
+    };
+    
+    // Проверяем, что src уже установлен (useEffect для загрузки уже отработал)
+    // Используем несколько попыток для надежности
+    let attempts = 0;
+    const maxAttempts = 10;
+    
+    const tryStartAutoplay = () => {
+      attempts++;
+      if (!shouldAutoPlayRef.current) return;
+      
+      // Проверяем что src установлен
+      if (activeAudio.src === currentTrack.audioUrl) {
+        // src установлен - запускаем автоплей
+        startAutoplay();
+      } else if (attempts < maxAttempts) {
+        // src еще не установлен - пробуем еще раз
+        setTimeout(tryStartAutoplay, 100);
+      } else {
+        // Если после всех попыток src не установлен, сбрасываем флаг
+        shouldAutoPlayRef.current = false;
+      }
+    };
+    
+    // Первая попытка через небольшую задержку
+    const timeout = setTimeout(tryStartAutoplay, 100);
+    
+    return () => clearTimeout(timeout);
+  }, [currentTrack?.audioUrl, isPlaying]);
+  
+  // Управление play/pause (только для ручного управления)
+  useEffect(() => {
+    const activeAudio = getActiveAudio();
+    if (!activeAudio || !currentTrack?.audioUrl) {
       return;
     }
+    
+    // Пропускаем play/pause если идет кроссфейд или пропуск загрузки
+    // НО: если трек уже играет и мы только что завершили кроссфейд, не сбрасываем isPlaying
+    if (isCrossfading.current || skipAudioLoadRef.current) {
+      return;
+    }
+    
+    // ВАЖНО: Если activeAudio является fromAudio во время кроссфейда, не трогаем его
+    if (fromAudioRef.current && activeAudio === fromAudioRef.current) {
+      return;
+    }
+    
+    // ВАЖНО: если трек играет (isPlaying = true), но activeAudio.paused = false,
+    // это может быть сразу после кроссфейда - не сбрасываем isPlaying
+    if (isPlaying && !activeAudio.paused && activeAudio.currentTime > 0) {
+      return;
+    }
+    
+    // Если это автоплей, даем ему приоритет, но не блокируем полностью
+    // Автоплей обрабатывается отдельным useEffect, но если он не сработал,
+    // обычное воспроизведение все равно должно работать
+    const isAutoplay = shouldAutoPlayRef.current;
+    
     if (isPlaying) {
-      audio
-        .play()
+      // Проверяем, не играет ли уже трек (может быть после кроссфейда)
+      if (!activeAudio.paused && activeAudio.currentTime > 0) {
+        return;
+      }
+      
+      // Проверяем готовность аудио
+      const tryPlay = () => {
+        // ВАЖНО: синхронизируем currentTime из ref (последнее значение из seek или паузы) перед play()
+        // Это гарантирует, что трек начнется с правильной позиции после seek() или паузы
+        // Приоритет: lastSeekedTimeRef > currentTime state > activeAudio.currentTime
+        let targetTime = activeAudio.currentTime;
+        if (lastSeekedTimeRef.current > 0) {
+          // Используем значение из ref, если оно было установлено
+          targetTime = lastSeekedTimeRef.current;
+        } else if (currentTime > 0) {
+          // Используем значение из состояния, если ref не установлен
+          targetTime = currentTime;
+        }
+        // Всегда синхронизируем перед play(), чтобы гарантировать правильную позицию
+        if (Math.abs(activeAudio.currentTime - targetTime) > 0.05) {
+          activeAudio.currentTime = targetTime;
+        }
+        // Если это автоплей, сбрасываем флаг после успешного запуска
+        if (isAutoplay) {
+          shouldAutoPlayRef.current = false;
+        }
+        activeAudio.play()
         .then(() => {
-          if (audio.duration && !Number.isNaN(audio.duration)) {
-            setDuration(audio.duration);
+          if (activeAudio.duration && !Number.isNaN(activeAudio.duration)) {
+            setDuration(activeAudio.duration);
+          }
+          // Записываем в историю прослушиваний при начале воспроизведения
+          if (currentTrack?.id && activeAudio.currentTime < 1 && isAuthenticated) {
+            recordPlayHistory(currentTrack.id).catch((err: unknown) => {
+              console.error('[PLAY_HISTORY] Failed to record:', err);
+            });
           }
         })
-        .catch(() => setIsPlaying(false));
+          .catch((error) => {
+            console.error('[PLAY_PAUSE] Play error:', error);
+            setIsPlaying(false);
+            if (isAutoplay) {
+              shouldAutoPlayRef.current = false;
+            }
+          });
+      };
+      
+      // Воспроизведение (автоплей или ручное)
+      if (activeAudio.readyState >= 2) {
+        // Аудио уже загружено, можно играть
+        tryPlay();
     } else {
-      audio.pause();
+        // Ждем готовности
+        const handleCanPlay = () => {
+          tryPlay();
+          activeAudio.removeEventListener('canplay', handleCanPlay);
+        };
+        activeAudio.addEventListener('canplay', handleCanPlay, { once: true });
+        return () => activeAudio.removeEventListener('canplay', handleCanPlay);
+      }
+    } else {
+      // ВАЖНО: сохраняем currentTime в ref при паузе, чтобы восстановить его при play()
+      // Используем activeAudio.currentTime в приоритете, но если он 0, используем значение из состояния или ref
+      const timeToSave = activeAudio.currentTime > 0 
+        ? activeAudio.currentTime 
+        : (currentTime > 0 ? currentTime : lastSeekedTimeRef.current);
+      if (timeToSave > 0) {
+        lastSeekedTimeRef.current = timeToSave;
+        // ВАЖНО: обновляем currentTime state, чтобы UI показывал правильное время при паузе
+        // Это гарантирует, что таймер не покажет 0:00 при паузе
+        if (currentTime !== timeToSave) {
+          setCurrentTime(timeToSave);
+        }
+      }
+      // Вызываем pause() только если аудио действительно играет
+      // pause() возвращает void, не Promise, поэтому не используем .catch()
+      if (!activeAudio.paused) {
+        try {
+          activeAudio.pause();
+        } catch (error) {
+          // Игнорируем ошибки при паузе
+          console.error('[PLAY_PAUSE] Pause error:', error);
+        }
+      }
     }
-  }, [isPlaying, currentTrack?.audioUrl]);
+  }, [isPlaying, currentTrack?.audioUrl, getActiveAudio, currentTime, isAuthenticated, recordPlayHistory]);
 
   useEffect(() => {
-    if (audioRef.current && currentTrack?.audioUrl) {
-      audioRef.current.volume = volume / 100;
+    const activeAudio = getActiveAudio();
+    if (activeAudio && currentTrack?.audioUrl) {
+      // Обновляем громкость без перезагрузки трека
+      // Не вызываем load() или pause() - просто меняем volume
+      activeAudio.volume = volume / 100;
     }
-  }, [volume, currentTrack?.audioUrl]);
+  }, [volume]);
 
-  const setCurrentTrack = (track: Track, playlistName?: string) => {
+  const setCurrentTrack = (track: Track, playlistName?: string, options?: { keepAudio?: boolean }) => {
     const parsedLyrics = normalizeLyricsInput(track.lyrics);
     const normalizedLyrics = parsedLyrics.length ? parsedLyrics : [];
 
@@ -459,6 +1338,28 @@ const hydrateTrackDetails = useCallback(
       playlistTitle: playlistName || track.playlistTitle,
     };
 
+    // Сбрасываем gapless только если это не кроссфейд
+    if (!options?.keepAudio) {
+    gaplessNextTrackRef.current = null;
+    gaplessPreparedTrackIdRef.current = null;
+    }
+    
+    // Устанавливаем флаг автоплея ПЕРЕД обновлением состояния трека
+    // Это гарантирует, что useEffect для загрузки увидит флаг
+    // НО только если включена настройка "воспроизведение без пауз" (gapless)
+    if (!options?.keepAudio) {
+      if (gapless) {
+        shouldAutoPlayRef.current = true;
+        setIsPlaying(true);
+      } else {
+        shouldAutoPlayRef.current = false;
+        setIsPlaying(false);
+      }
+      setCurrentTime(0);
+      lastSeekedTimeRef.current = 0; // Сбрасываем ref при установке нового трека
+      setDuration(trackWithLyrics.duration || 225);
+    }
+    
     setCurrentTrackState(trackWithLyrics);
     
     if (playlistName === 'API Tracks') {
@@ -510,9 +1411,9 @@ const hydrateTrackDetails = useCallback(
       }
     }
     
-    setCurrentTime(0);
-    setDuration(trackWithLyrics.duration || 225);
-    setIsPlaying(true);
+    // ВАЖНО: setCurrentTime и setDuration уже установлены выше (строки 1187-1188)
+    // Флаг автоплея тоже уже установлен выше (строки 1177-1189) с проверкой gapless
+    // Этот блок удален, чтобы избежать дублирования и конфликтов
 
     if (trackWithLyrics.id) {
       hydrateTrackDetails(trackWithLyrics.id, trackWithLyrics);
@@ -525,6 +1426,138 @@ const hydrateTrackDetails = useCallback(
     }
   };
 
+  // Настройка обработчиков для audio элементов
+  useEffect(() => {
+    // Используем уже созданные audio элементы
+    const audio1 = audioRef.current;
+    const audio2 = audioRef2.current;
+    
+    if (!audio1 || !audio2) {
+      return;
+    }
+
+    const handleTimeUpdate = (audio: HTMLAudioElement) => () => {
+      const activeAudio = getActiveAudio();
+      if (audio === activeAudio) {
+        const newTime = audio.currentTime;
+        // ВАЖНО: не обновляем currentTime state в 0, если трек на паузе или если newTime стал 0 из-за ошибки
+        // Это предотвращает сброс таймера в 0:00 при паузе
+        if (newTime > 0 || !audio.paused) {
+          setCurrentTime(newTime);
+          // Обновляем ref только если трек играет (не на паузе), чтобы сохранить актуальное значение
+          if (!audio.paused && newTime > 0) {
+            lastSeekedTimeRef.current = newTime;
+          }
+        }
+      }
+    };
+
+    const handleLoadedMetadata = (audio: HTMLAudioElement) => () => {
+      const activeAudio = getActiveAudio();
+      if (audio === activeAudio && !Number.isNaN(audio.duration) && audio.duration > 0) {
+        setDuration(audio.duration);
+      }
+    };
+
+  const handleEnded = (audio: HTMLAudioElement) => () => {
+      const activeAudio = getActiveAudio();
+      if (audio !== activeAudio) return;
+
+      // Если идет кроссфейд, не обрабатываем ended (кроссфейд сам переключит трек)
+      if (isCrossfading.current) return;
+
+      // Gapless: если подготовлен следующий трек — мгновенно переключаемся
+      if (gaplessEnabledRef.current && gaplessNextTrackRef.current && gaplessNextTrackRef.current.audioUrl) {
+        const preparedNext = gaplessNextTrackRef.current;
+        const inactiveAudio = getInactiveAudio();
+        
+        if (inactiveAudio && inactiveAudio.src === preparedNext.audioUrl) {
+          // Отменяем любой активный кроссфейд
+          cancelCrossfade();
+          
+          // Переключаемся на подготовленный трек
+          inactiveAudio.volume = volume / 100;
+          inactiveAudio.currentTime = 0;
+          
+          inactiveAudio.play().then(() => {
+            // Переключаем активный аудио
+          activeAudioRef.current = activeAudioRef.current === 'audio1' ? 'audio2' : 'audio1';
+            
+            // Обновляем состояние без сброса воспроизведения
+          skipAudioLoadRef.current = true;
+            
+            // Используем setCurrentTrack для обновления состояния и загрузки деталей
+          setCurrentTrack(preparedNext, currentPlaylistName, { keepAudio: true });
+          setCurrentTime(inactiveAudio.currentTime || 0);
+            setDuration(!Number.isNaN(inactiveAudio.duration) && inactiveAudio.duration > 0 ? inactiveAudio.duration : (preparedNext.duration || 225));
+          setIsPlaying(true);
+            
+            // Очищаем подготовленный трек
+            gaplessNextTrackRef.current = null;
+            gaplessPreparedTrackIdRef.current = null;
+            skipAudioLoadRef.current = false;
+          }).catch((error) => {
+            console.error('Gapless playback error:', error);
+            // Fallback: обычное переключение
+            gaplessNextTrackRef.current = null;
+            gaplessPreparedTrackIdRef.current = null;
+            nextTrackRef.current();
+          });
+          
+          return;
+        }
+      }
+
+      // Обычная обработка окончания трека
+      if (repeatRef.current) {
+        audio.currentTime = 0;
+      audio.play().catch(() => setIsPlaying(false));
+      } else {
+        // Если gapless выключен или не подготовлен, запускаем следующий трек
+      nextTrackRef.current();
+      }
+    };
+
+    const handleError = () => {
+      setIsPlaying(false);
+    };
+
+    const handleTimeUpdate1 = handleTimeUpdate(audio1);
+    const handleTimeUpdate2 = handleTimeUpdate(audio2);
+    const handleLoadedMetadata1 = handleLoadedMetadata(audio1);
+    const handleLoadedMetadata2 = handleLoadedMetadata(audio2);
+    const handleEnded1 = handleEnded(audio1);
+    const handleEnded2 = handleEnded(audio2);
+
+    audio1.addEventListener('timeupdate', handleTimeUpdate1);
+    audio1.addEventListener('loadedmetadata', handleLoadedMetadata1);
+    audio1.addEventListener('ended', handleEnded1);
+    audio1.addEventListener('error', handleError);
+
+    audio2.addEventListener('timeupdate', handleTimeUpdate2);
+    audio2.addEventListener('loadedmetadata', handleLoadedMetadata2);
+    audio2.addEventListener('ended', handleEnded2);
+    audio2.addEventListener('error', handleError);
+
+    return () => {
+      audio1.pause();
+      audio1.src = '';
+      audio1.removeEventListener('timeupdate', handleTimeUpdate1);
+      audio1.removeEventListener('loadedmetadata', handleLoadedMetadata1);
+      audio1.removeEventListener('ended', handleEnded1);
+      audio1.removeEventListener('error', handleError);
+
+      audio2.pause();
+      audio2.src = '';
+      audio2.removeEventListener('timeupdate', handleTimeUpdate2);
+      audio2.removeEventListener('loadedmetadata', handleLoadedMetadata2);
+      audio2.removeEventListener('ended', handleEnded2);
+      audio2.removeEventListener('error', handleError);
+      
+      // Не удаляем audio элементы, только очищаем обработчики
+    };
+  }, []);
+
   const extractColorFromImage = (_imageUrl: string) => {
     // Simplified - always use default Spotify colors
     setDominantColor('#121212');
@@ -534,17 +1567,15 @@ const hydrateTrackDetails = useCallback(
   };
 
   const nextTrack = useCallback(() => {
-    // Сначала проверяем очередь
-    if (queue.length > 0) {
-      const nextQueuedTrack = queue[0];
-      setQueue(prev => prev.slice(1));
-      setCurrentTrack(nextQueuedTrack, nextQueuedTrack.playlistTitle || currentPlaylistName);
-      // Запускаем воспроизведение
-      setTimeout(() => {
-        setIsPlaying(true);
-      }, 100);
-      return;
-    }
+    cancelCrossfade();
+      // Сначала проверяем очередь
+      if (queue.length > 0) {
+        const nextQueuedTrack = queue[0];
+        setQueue(prev => prev.slice(1));
+        // setCurrentTrack уже проверяет настройку gapless и устанавливает isPlaying соответственно
+        setCurrentTrack(nextQueuedTrack, nextQueuedTrack.playlistTitle || currentPlaylistName);
+        return;
+      }
     
     // Определяем текущий плейлист треков
     let tracksToUse: Track[] = [];
@@ -626,62 +1657,151 @@ const hydrateTrackDetails = useCallback(
     // Обновляем индекс для следующего трека
     setCurrentTrackIndex(nextIndex);
     setCurrentTrack(nextTrackToPlay, currentPlaylistName);
-  }, [currentPlaylistName, shuffle, apiTracks, shuffledPlaylist, shuffledPlaylistIndex, queue, currentTrack, currentPlaylistTracks, currentTrackIndex, likedTracksList]);
+  }, [cancelCrossfade, currentPlaylistName, shuffle, apiTracks, shuffledPlaylist, shuffledPlaylistIndex, queue, currentTrack, currentPlaylistTracks, currentTrackIndex, likedTracksList]);
 
   useEffect(() => {
     nextTrackRef.current = nextTrack;
   }, [nextTrack]);
 
   const previousTrack = useCallback(() => {
-      let currentPlaylistTracks: Track[] = [];
+    cancelCrossfade();
+      let tracksToUse: Track[] = [];
+    
+    if (currentPlaylistName === 'API Tracks') {
+      tracksToUse = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : apiTracks;
+    } else if (currentPlaylistName === 'Liked Songs') {
+      tracksToUse = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : (likedTracksList.length > 0 ? likedTracksList : apiTracks);
+    } else if (currentPlaylistTracks.length > 0) {
+      tracksToUse = shuffle && shuffledPlaylist.length > 0 ? shuffledPlaylist : currentPlaylistTracks;
+    } else {
+      return;
+    }
+    
+    const activeAudio = getActiveAudio();
+    
+    // Если трек играет больше 3 секунд, перезапускаем его с начала
+    // Если трек в самом начале (<= 0.1 сек), переключаемся на предыдущий трек
+    if (currentTime <= 0.1 && activeAudio && tracksToUse.length > 1) {
+      // В самом начале - переключаемся на предыдущий трек
+      const currentIndex = Math.max(0, Math.min(currentTrackIndex, tracksToUse.length - 1));
+      const prevIndex = currentIndex === 0 ? tracksToUse.length - 1 : currentIndex - 1;
+      const prevTrack = tracksToUse[prevIndex];
       
-    if (currentPlaylistName === 'API Tracks' || currentPlaylistName === 'Liked Songs') {
-        currentPlaylistTracks = apiTracks;
+      if (prevTrack) {
+        setCurrentTrackIndex(prevIndex);
+        setCurrentTrack(prevTrack, currentPlaylistName);
+      }
+      return;
+    }
+    
+    if (currentTime > 3 && activeAudio) {
+      activeAudio.currentTime = 0;
+      setCurrentTime(0);
+      lastSeekedTimeRef.current = 0;
+      // Автозапуск при перезапуске трека - только если включена настройка gapless
+      if (gapless) {
+        shouldAutoPlayRef.current = true;
+        setIsPlaying(true);
+        // Запускаем воспроизведение если аудио готово
+        if (activeAudio.readyState >= 2) {
+          activeAudio.play()
+            .then(() => {
+              setIsPlaying(true);
+              shouldAutoPlayRef.current = false;
+            })
+            .catch((error) => {
+              console.error('[PREV_TRACK] Play error:', error);
+              setIsPlaying(false);
+              shouldAutoPlayRef.current = false;
+            });
+        } else {
+          const handleCanPlay = () => {
+            activeAudio.play()
+              .then(() => {
+                setIsPlaying(true);
+                shouldAutoPlayRef.current = false;
+              })
+              .catch((error) => {
+                console.error('[PREV_TRACK] Play error:', error);
+                setIsPlaying(false);
+                shouldAutoPlayRef.current = false;
+              });
+            activeAudio.removeEventListener('canplay', handleCanPlay);
+            activeAudio.removeEventListener('loadeddata', handleLoadedData);
+          };
+          
+          const handleLoadedData = () => {
+            if (activeAudio.readyState >= 2 && shouldAutoPlayRef.current) {
+              handleCanPlay();
+            }
+          };
+          
+          activeAudio.addEventListener('canplay', handleCanPlay, { once: true });
+          activeAudio.addEventListener('loadeddata', handleLoadedData, { once: true });
+        }
       } else {
-      currentPlaylistTracks = [];
-    }
-    
-    // Если трек играет больше 3 секунд - начинаем сначала
-    if (currentTime > 3) {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        setCurrentTime(0);
+        shouldAutoPlayRef.current = false;
+        setIsPlaying(false);
+        if (activeAudio && !activeAudio.paused) {
+          try {
+            activeAudio.pause();
+          } catch (error) {
+            console.error('[PREV_TRACK] Pause error:', error);
+          }
+        }
       }
       return;
     }
     
-    // Если треков нет или только один - начинаем сначала
-    if (currentPlaylistTracks.length <= 1) {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
+    // Если трек играет меньше 3 секунд или трек один, переключаемся на предыдущий
+    if (tracksToUse.length <= 1) {
+      if (activeAudio) {
+        activeAudio.currentTime = 0;
         setCurrentTime(0);
+        if (gapless) {
+          shouldAutoPlayRef.current = true;
+          setIsPlaying(true);
+          if (activeAudio.readyState >= 2) {
+            activeAudio.play()
+              .then(() => {
+                setIsPlaying(true);
+                shouldAutoPlayRef.current = false;
+              })
+              .catch((error) => {
+                console.error('[PREV_TRACK] Play error:', error);
+                setIsPlaying(false);
+                shouldAutoPlayRef.current = false;
+              });
+          }
+        } else {
+          shouldAutoPlayRef.current = false;
+          setIsPlaying(false);
+          if (!activeAudio.paused) {
+            try {
+              activeAudio.pause();
+            } catch (error) {
+              console.error('[PREV_TRACK] Pause error:', error);
+            }
+          }
+        }
       }
       return;
     }
     
-    // Переключаем на предыдущий трек
-      const prevIndex = currentTrackIndex === 0 
-        ? currentPlaylistTracks.length - 1 
-        : currentTrackIndex - 1;
-      const prevTrack = currentPlaylistTracks[prevIndex];
+    // Переключаемся на предыдущий трек
+    const currentIndex = Math.max(0, Math.min(currentTrackIndex, tracksToUse.length - 1));
+    const prevIndex = currentIndex === 0 ? tracksToUse.length - 1 : currentIndex - 1;
+    const prevTrack = tracksToUse[prevIndex];
+    
+    if (prevTrack) {
+      setCurrentTrackIndex(prevIndex);
       setCurrentTrack(prevTrack, currentPlaylistName);
-  }, [currentTime, currentTrackIndex, currentPlaylistName, apiTracks]);
-
-  useEffect(() => {
-    // Always use default Spotify colors
-    setDominantColor('#121212');
-    setColorPalette([]);
-    setTextColor('#FFFFFF');
-    setTextShadow('none');
-  }, [currentTrack]);
-
-  // Auto-play next track when current ends
-  useEffect(() => {
-    if (currentTime >= duration && isPlaying && !repeat) {
-      // Track ended, play next
-      nextTrack();
     }
-  }, [currentTime, duration, isPlaying, repeat]);
+  }, [cancelCrossfade, currentTime, currentTrackIndex, currentPlaylistName, apiTracks, likedTracksList, currentPlaylistTracks, shuffle, shuffledPlaylist, shuffledPlaylistIndex, getActiveAudio, gapless]);
+
+  // Цвета всегда используют дефолтные значения Spotify (убрано из useEffect для оптимизации)
+
+  // Auto-play next track when current ends (обрабатывается в handleEnded, этот useEffect удален для оптимизации)
 
   // Simulate time progression
   useEffect(() => {
@@ -721,8 +1841,35 @@ const hydrateTrackDetails = useCallback(
   }, [isPlaying, duration, repeat, currentTrack?.audioUrl]);
 
   const togglePlay = useCallback(() => {
+    const activeAudio = getActiveAudio();
+    if (!activeAudio || !currentTrack?.audioUrl) {
+      // Если нет трека, ничего не делаем
+      return;
+    }
+    
+    // Если идет кроссфейд, не переключаем
+    if (isCrossfading.current) {
+      return;
+    }
+    
+    // Если аудио еще не загружено, загружаем его
+    // Используем нормализацию URL для правильного сравнения
+    const normalizeUrl = (url: string) => url.replace(/^https?:\/\//, '').split('?')[0];
+    const currentSrc = activeAudio.src || '';
+    const newSrc = currentTrack.audioUrl || '';
+    const isNewTrack = normalizeUrl(currentSrc) !== normalizeUrl(newSrc);
+    
+    if (!activeAudio.src || isNewTrack) {
+      // Только если это действительно новый трек, загружаем его
+      // Это сбросит currentTime в 0, что правильно для нового трека
+      activeAudio.src = currentTrack.audioUrl;
+      activeAudio.load();
+    }
+    // Если это тот же трек, не вызываем load() - currentTime сохранится
+    
+    // Переключаем состояние воспроизведения
     setIsPlaying(prev => !prev);
-  }, []);
+  }, [getActiveAudio, currentTrack?.audioUrl]);
 
   const toggleFullscreen = useCallback(() => {
     setIsFullscreen(prev => !prev);
@@ -730,11 +1877,14 @@ const hydrateTrackDetails = useCallback(
 
   const seek = useCallback((time: number) => {
     const clamped = Math.max(0, Math.min(time, duration));
-    if (audioRef.current && currentTrack?.audioUrl) {
-      audioRef.current.currentTime = clamped;
+    const activeAudio = getActiveAudio();
+    if (activeAudio && currentTrack?.audioUrl) {
+      activeAudio.currentTime = clamped;
+      // Сохраняем последнее значение для синхронизации при play()
+      lastSeekedTimeRef.current = clamped;
     }
     setCurrentTime(clamped);
-  }, [duration, currentTrack?.audioUrl]);
+  }, [duration, currentTrack?.audioUrl, getActiveAudio]);
 
   const toggleShuffle = useCallback(() => {
     setShuffle(prev => {
@@ -893,24 +2043,42 @@ const hydrateTrackDetails = useCallback(
 
       // Handle arrow keys separately (they don't work with toLowerCase)
       if (e.key === 'ArrowRight') {
-          e.preventDefault();
-        // Устанавливаем флаг для автоматического включения
-        shouldAutoPlayRef.current = true;
+        e.preventDefault();
+        // Устанавливаем флаг для автоматического включения только если включена настройка gapless
+        // nextTrack() уже проверяет gapless в setCurrentTrack, но здесь устанавливаем флаг явно
+        if (gapless) {
+          shouldAutoPlayRef.current = true;
+        } else {
+          shouldAutoPlayRef.current = false;
+        }
         // Переключаем трек
-          nextTrack();
+        nextTrack();
         return;
       }
       if (e.key === 'ArrowLeft') {
-          e.preventDefault();
-          previousTrack();
+        e.preventDefault();
+        previousTrack();
         return;
       }
       if (e.key === 'ArrowUp') {
           e.preventDefault();
           if (volume < 100) {
             const newVolumeUp = Math.min(100, volume + 5);
+            // Очищаем предыдущий таймаут для debounce
+            if (volumeUpdateTimeoutRef.current) {
+              clearTimeout(volumeUpdateTimeoutRef.current);
+            }
+            // Обновляем громкость с небольшой задержкой для уменьшения частоты обновлений
+            volumeUpdateTimeoutRef.current = setTimeout(() => {
             setVolume(newVolumeUp);
-            if (Math.abs(newVolumeUp - lastVolumeToastRef.current) >= 10 || newVolumeUp === 100) {
+            }, 0);
+            // Обновляем громкость аудио сразу для плавности
+            const activeAudio = getActiveAudio();
+            if (activeAudio) {
+              activeAudio.volume = newVolumeUp / 100;
+            }
+            // Показываем уведомление только если громкость кратна 10
+            if (newVolumeUp % 10 === 0) {
               toast.success(`Volume: ${newVolumeUp}%`, { duration: 800 });
               lastVolumeToastRef.current = newVolumeUp;
             }
@@ -921,8 +2089,21 @@ const hydrateTrackDetails = useCallback(
           e.preventDefault();
           if (volume > 0) {
             const newVolumeDown = Math.max(0, volume - 5);
+            // Очищаем предыдущий таймаут для debounce
+            if (volumeUpdateTimeoutRef.current) {
+              clearTimeout(volumeUpdateTimeoutRef.current);
+            }
+            // Обновляем громкость с небольшой задержкой для уменьшения частоты обновлений
+            volumeUpdateTimeoutRef.current = setTimeout(() => {
             setVolume(newVolumeDown);
-            if (Math.abs(newVolumeDown - lastVolumeToastRef.current) >= 10 || newVolumeDown === 0) {
+            }, 0);
+            // Обновляем громкость аудио сразу для плавности
+            const activeAudio = getActiveAudio();
+            if (activeAudio) {
+              activeAudio.volume = newVolumeDown / 100;
+            }
+            // Показываем уведомление только если громкость кратна 10
+            if (newVolumeDown % 10 === 0) {
               toast.success(`Volume: ${newVolumeDown}%`, { duration: 800 });
               lastVolumeToastRef.current = newVolumeDown;
             }
@@ -1097,7 +2278,81 @@ const hydrateTrackDetails = useCallback(
         return tracksToUse[nextIndex] || null;
       }
     },
+    forcePlayNext: () => {
+      nextTrack();
+    },
   };
+
+  // MediaSession API для поддержки физических кнопок (наушники, клавиатура)
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) {
+      return;
+    }
+
+    const mediaSession = navigator.mediaSession;
+    
+    // Обновляем метаданные трека
+    const updateMetadata = () => {
+      if (!currentTrack) {
+        mediaSession.metadata = null;
+        return;
+      }
+
+      
+      mediaSession.metadata = new MediaMetadata({
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        album: (currentTrack as any).album || '',
+        artwork: currentTrack.image ? [
+          { src: currentTrack.image, sizes: '512x512', type: 'image/jpeg' }
+        ] : []
+      });
+    };
+
+    // Обработчики действий MediaSession
+    mediaSession.setActionHandler('play', () => {
+      if (!isPlaying) {
+        togglePlay();
+      }
+    });
+
+    mediaSession.setActionHandler('pause', () => {
+      if (isPlaying) {
+        togglePlay();
+      }
+    });
+
+    mediaSession.setActionHandler('previoustrack', () => {
+      previousTrack();
+    });
+
+    mediaSession.setActionHandler('nexttrack', () => {
+      nextTrack();
+    });
+
+    // Обновляем состояние воспроизведения
+    const updatePlaybackState = () => {
+      if (isPlaying) {
+        mediaSession.playbackState = 'playing';
+      } else {
+        mediaSession.playbackState = 'paused';
+      }
+    };
+
+    // Обновляем метаданные при смене трека (только при изменении currentTrack)
+    updateMetadata();
+    updatePlaybackState();
+
+    return () => {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = null;
+        navigator.mediaSession.setActionHandler('play', null);
+        navigator.mediaSession.setActionHandler('pause', null);
+        navigator.mediaSession.setActionHandler('previoustrack', null);
+        navigator.mediaSession.setActionHandler('nexttrack', null);
+      }
+    };
+  }, [currentTrack, isPlaying, togglePlay, nextTrack, previousTrack]);
 
   // Загружаем треки из API при инициализации
   useEffect(() => {

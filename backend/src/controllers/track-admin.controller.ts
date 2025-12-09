@@ -431,7 +431,6 @@ export const updateTrack = asyncHandler(
       artistId,
       albumId,
       albumName,
-      albumYear,
       genreId,
       genreName,
       duration,

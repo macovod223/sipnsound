@@ -5,6 +5,8 @@ interface SettingsContextType {
   // Playback
   crossfade: boolean;
   setCrossfade: (value: boolean) => void;
+  crossfadeDuration: number;
+  setCrossfadeDuration: (value: number) => void;
   gapless: boolean;
   setGapless: (value: boolean) => void;
   normalizeVolume: boolean;
@@ -57,6 +59,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   // Playback
   const [crossfade, setCrossfadeState] = useState(() => loadSetting('crossfade', true));
+  const [crossfadeDuration, setCrossfadeDurationState] = useState(() => loadSetting('crossfadeDuration', 5));
   const [gapless, setGaplessState] = useState(() => loadSetting('gapless', true));
   const [normalizeVolume, setNormalizeVolumeState] = useState(() => loadSetting('normalizeVolume', false));
 
@@ -94,6 +97,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   };
 
   const setCrossfade = createSetter('crossfade', setCrossfadeState);
+  const setCrossfadeDuration = createSetter('crossfadeDuration', setCrossfadeDurationState);
   const setGapless = createSetter('gapless', setGaplessState);
   const setNormalizeVolume = createSetter('normalizeVolume', setNormalizeVolumeState);
   const setAnimations = createSetter('animations', setAnimationsState);
@@ -132,6 +136,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const value: SettingsContextType = {
     crossfade,
     setCrossfade,
+    crossfadeDuration,
+    setCrossfadeDuration,
     gapless,
     setGapless,
     normalizeVolume,

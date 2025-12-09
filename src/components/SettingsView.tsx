@@ -125,6 +125,36 @@ export function SettingsView() {
                 }}
               />
             </div>
+            {settings.crossfade && (
+              <div className="py-2">
+                <div className="flex items-center justify-between gap-4 mb-3">
+                  <label htmlFor="crossfade-duration" className="text-white text-sm sm:text-base">
+                    {t('crossfadeDuration') || 'Crossfade duration'}
+                  </label>
+                  <span className="text-white/70 text-sm font-medium tabular-nums">
+                    {settings.crossfadeDuration} {t('sec') || 'sec'}
+                  </span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="range"
+                    id="crossfade-duration"
+                    min="1"
+                    max="12"
+                    step="1"
+                    value={settings.crossfadeDuration}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value, 10);
+                      settings.setCrossfadeDuration(value);
+                    }}
+                    className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer crossfade-slider"
+                    style={{
+                      background: `linear-gradient(to right, #1ED760 0%, #1ED760 ${((settings.crossfadeDuration - 1) / 11) * 100}%, rgba(255, 255, 255, 0.1) ${((settings.crossfadeDuration - 1) / 11) * 100}%, rgba(255, 255, 255, 0.1) 100%)`
+                    }}
+                  />
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-4 py-2">
               <label htmlFor="gapless" className="text-white text-sm sm:text-base cursor-pointer">
                 {t('gaplessPlayback')}

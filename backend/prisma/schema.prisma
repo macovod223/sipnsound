@@ -23,7 +23,6 @@ model User {
   likedTracks       LikedTrack[]
   playHistory       PlayHistory[]
   playlists         Playlist[]
-  queue             QueueTrack[]
   uploadedTracks    Track[]          @relation("UploadedBy")
 
   @@map("users")
@@ -84,7 +83,6 @@ model Track {
   likedBy      LikedTrack[]
   playHistory  PlayHistory[]
   playlists    PlaylistTrack[]
-  queueTracks  QueueTrack[]
   album        Album?          @relation(fields: [albumId], references: [id])
   artist       Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
   genre        Genre?          @relation(fields: [genreId], references: [id])
@@ -175,18 +173,6 @@ model Following {
   @@map("following")
 }
 
-model QueueTrack {
-  id       String   @id @default(uuid())
-  userId   String   @map("user_id")
-  trackId  String   @map("track_id")
-  position Int
-  addedAt  DateTime @default(now()) @map("added_at")
-  track    Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@map("queue_tracks")
-}
 
 enum UserRole {
   USER

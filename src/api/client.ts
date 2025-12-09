@@ -212,6 +212,17 @@ class ApiClient {
     return this.request<{ url: string; title: string; artist: string; isLocal: boolean }>(`/api/tracks/${id}/stream`);
   }
 
+  async recordPlayHistory(trackId: string): Promise<void> {
+    try {
+      await this.request(`/api/tracks/${trackId}/play-history`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      // Игнорируем ошибки записи истории (не критично)
+      console.error('Failed to record play history:', error);
+    }
+  }
+
   async getTrackLyrics(id: string): Promise<{ lyrics: any; source?: string }> {
     return this.request<{ lyrics: any; source?: string }>(`/api/tracks/${id}/lyrics`);
   }

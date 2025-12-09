@@ -376,7 +376,7 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
 
   const monthlyListenersLabel = useMemo(() => {
     if (!artistData?.monthlyListeners) return "0";
-    return artistData.monthlyListeners.toLocaleString("ru-RU");
+    return artistData.monthlyListeners.toLocaleString("en-US");
   }, [artistData?.monthlyListeners]);
 
   if (isLoading) {
@@ -562,7 +562,7 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
                   </div>
 
                   <div className="hidden md:block w-32 text-sm text-white/60">
-                    {track.playsCount?.toLocaleString("ru-RU") ?? "—"}
+                    {track.playsCount?.toLocaleString("en-US") ?? "—"}
                   </div>
 
                   <div className="w-20 text-sm text-white/60 flex items-center gap-6">

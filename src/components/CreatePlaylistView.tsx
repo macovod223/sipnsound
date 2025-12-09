@@ -8,6 +8,7 @@ import { formatDuration } from '../utils/time';
 import { apiClient, Playlist, PlaylistDetails } from '../api/client';
 import { toast } from 'sonner';
 import { resolveImageUrl } from '../utils/media';
+import { pluralize, pluralizeEn } from './translations';
 
 interface CreatePlaylistViewProps {
   onBack: () => void;
@@ -16,7 +17,7 @@ interface CreatePlaylistViewProps {
 const FALLBACK_PLAYLIST_COVER = 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400';
 
 export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
-  const { animations, t } = useSettings();
+  const { animations, t, language } = useSettings();
   const [playlistName, setPlaylistName] = useState('');
   const [playlistDescription, setPlaylistDescription] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -425,7 +426,9 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
               {addedTracks.length > 0 && (
                 <div className="mb-4">
                   <p className="text-white/60 text-sm mb-3">
-                    {addedTracks.length} {addedTracks.length === 1 ? t('track') : t('tracks')} {t('added')}
+                    {language === 'Русский' 
+                      ? `${addedTracks.length} ${pluralize(addedTracks.length, 'трек', 'трека', 'треков')} ${t('added')}`
+                      : `${addedTracks.length} ${pluralizeEn(addedTracks.length, 'track')} ${t('added')}`}
                   </p>
                   <div className="space-y-2 max-h-60 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255, 255, 255, 0.2) transparent' }}>
                     {addedTracks.map((track, index) => (
@@ -577,7 +580,13 @@ export function CreatePlaylistView({ onBack }: CreatePlaylistViewProps) {
                       <div className="flex-1 min-w-0">
                         <p className="text-white font-medium truncate">{playlist.title}</p>
                         <p className="text-xs text-gray-400 truncate">
-                          {(playlist._count?.tracks ?? 0)} {t('tracks') || 'треков'} · {playlist.isPublic ? (t('public') || 'Публичный') : (t('private') || 'Приватный')}
+                          {(() => {
+                            const count = playlist._count?.tracks ?? 0;
+                            const tracksText = language === 'Русский' 
+                              ? pluralize(count, 'трек', 'трека', 'треков')
+                              : pluralizeEn(count, 'track');
+                            return `${count} ${tracksText} · ${playlist.isPublic ? (t('public') || 'Публичный') : (t('private') || 'Приватный')}`;
+                          })()}
                         </p>
                       </div>
                       <div className="flex gap-2">

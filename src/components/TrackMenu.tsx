@@ -27,7 +27,7 @@ export function TrackMenu({ track, onClose }: TrackMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const { toggleLike, isLiked, addToQueue, openArtistView, openPlaylist, closePlaylist } = usePlayer();
-  const { t } = useSettings();
+  const { t, animations } = useSettings();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -157,7 +157,7 @@ export function TrackMenu({ track, onClose }: TrackMenuProps) {
           closePlaylist();
           openPlaylist({
             title: album.title,
-            artist: `${album.year || ''} • ${album.artist?.name || track.artist}`,
+            artist: `${album.year ? `${album.year} • ` : ''}${album.artist?.name || track.artist}`,
             image: album.coverUrl || album.coverPath || '',
             type: albumType,
             albumId: album.id,
@@ -191,13 +191,15 @@ export function TrackMenu({ track, onClose }: TrackMenuProps) {
         {isOpen && buttonRef.current && (
           <motion.div
             ref={menuRef}
-            initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
-            className="fixed z-[10001] min-w-[200px] bg-[#282828]/95 backdrop-blur-md rounded-lg shadow-2xl overflow-hidden"
+            initial={animations ? { opacity: 0, scale: 0.95 } : false}
+            animate={animations ? { opacity: 1, scale: 1 } : false}
+            exit={animations ? { opacity: 0, scale: 0.95 } : false}
+            transition={animations ? { duration: 0.15 } : { duration: 0 }}
+            className="fixed z-[10001] min-w-[200px] rounded-lg shadow-2xl overflow-hidden border border-white/10"
             style={{
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.7)',
+              backgroundColor: '#1f1f1f',
+              opacity: 1,
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.7)',
               ...menuStyle,
             }}
             onClick={(e) => e.stopPropagation()}

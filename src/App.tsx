@@ -62,8 +62,9 @@ type PlaylistCardData = {
   image: string;
 };
 
-
 const FALLBACK_PLAYLIST_IMAGE = 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400';
+const LIKED_SONGS_KEY = 'Liked Songs';
+const DJ_PLAYLIST_NAME = 'DJ';
 
 const normalizePlaylistCard = (playlist: { id: string; title: string; description?: string; coverUrl?: string }): PlaylistCardData => ({
   id: playlist.id,
@@ -93,7 +94,7 @@ function MainContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [activeView, setActiveView] = useState<'home' | 'library' | 'settings' | 'profile' | 'admin'>('home');
-  const [showAllSection, setShowAllSection] = useState<string | null>(null);
+  const [showAllSection, setShowAllSection] = useState<'made' | 'recommended' | 'apiTracks' | null>(null);
   const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   
@@ -103,8 +104,9 @@ function MainContent() {
   const [playlistReloadKey, setPlaylistReloadKey] = useState(0);
   
   // State for quick access items (artists and albums from database)
-  const [quickAccess, setQuickAccess] = useState<Array<{ title: string; image: string; type: 'liked' | 'playlist' | 'artist' | 'album'; id?: string }>>([
-    { title: "Liked Songs", image: "", type: "liked" },
+  const [quickAccess, setQuickAccess] = useState<Array<{ title: string; image: string; type: 'liked' | 'playlist' | 'artist' | 'album' | 'dj'; id?: string }>>([
+    { title: LIKED_SONGS_KEY, image: "", type: "liked" },
+    { title: DJ_PLAYLIST_NAME, image: "", type: "dj" },
   ]);
   const [loadingQuickAccess, setLoadingQuickAccess] = useState(false);
 
@@ -165,7 +167,10 @@ function MainContent() {
   // Load quick access items (top artists and albums) from database
   useEffect(() => {
     if (!isAuthenticated) {
-      setQuickAccess([{ title: "Liked Songs", image: "", type: "liked" }]);
+      setQuickAccess([
+        { title: LIKED_SONGS_KEY, image: "", type: "liked" },
+        { title: DJ_PLAYLIST_NAME, image: "", type: "dj" },
+      ]);
       setLoadingQuickAccess(false);
       return;
     }
@@ -183,8 +188,9 @@ function MainContent() {
 
         if (isCancelled) return;
 
-        const quickAccessItems: Array<{ title: string; image: string; type: 'liked' | 'playlist' | 'artist' | 'album'; id?: string }> = [
-          { title: "Liked Songs", image: "", type: "liked" },
+        const quickAccessItems: Array<{ title: string; image: string; type: 'liked' | 'playlist' | 'artist' | 'album' | 'dj'; id?: string }> = [
+          { title: LIKED_SONGS_KEY, image: "", type: "liked" },
+          { title: DJ_PLAYLIST_NAME, image: "", type: "dj" },
         ];
 
         // Добавляем топ артистов
@@ -220,11 +226,23 @@ function MainContent() {
           });
         }
 
-        setQuickAccess(quickAccessItems);
+        // Перемешиваем все, кроме закреплённых (Liked + DJ), и ограничиваем 6
+        const pinned = quickAccessItems.filter((item) => item.type === 'liked' || item.type === 'dj');
+        const rest = quickAccessItems.filter((item) => item.type !== 'liked' && item.type !== 'dj');
+        for (let i = rest.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [rest[i], rest[j]] = [rest[j], rest[i]];
+        }
+        const finalItems = [...pinned, ...rest].slice(0, 6);
+
+        setQuickAccess(finalItems);
       } catch (error: any) {
         // Ошибка обрабатывается через toast в apiClient
         if (!isCancelled) {
-          setQuickAccess([{ title: "Liked Songs", image: "", type: "liked" }]);
+          setQuickAccess([
+            { title: LIKED_SONGS_KEY, image: "", type: "liked" },
+            { title: DJ_PLAYLIST_NAME, image: "", type: "dj" },
+          ]);
         }
       } finally {
         if (!isCancelled) {
@@ -260,7 +278,7 @@ function MainContent() {
   
   // Playlists with localized descriptions
   const madeForYou = playlists.slice(0, 6); // First 6 playlists as "Made for You"
-  const recommendedPlaylists = playlists.slice(6); // Rest as "Recommended"
+  const recommendedPlaylists = playlists.length > 1 ? playlists.slice(1) : playlists; // Always show something
 
   // Get top glow color based on hovered playlist - enhanced with stronger glow
   const getTopGlowColor = () => {
@@ -270,9 +288,9 @@ function MainContent() {
 
     // Enhanced playlist colors with stronger, more vibrant gradients
     const playlistColors: Record<string, string> = {
-      'Liked Songs': "radial-gradient(ellipse 120% 60% at 50% 0%, rgba(167, 139, 250, 0.45) 0%, rgba(236, 72, 153, 0.25) 40%, transparent 80%)",
+      [LIKED_SONGS_KEY]: "radial-gradient(ellipse 120% 60% at 50% 0%, rgba(167, 139, 250, 0.45) 0%, rgba(236, 72, 153, 0.25) 40%, transparent 80%)",
+      [DJ_PLAYLIST_NAME]: "radial-gradient(ellipse 120% 60% at 50% 0%, rgba(34, 197, 94, 0.45) 0%, rgba(16, 185, 129, 0.25) 40%, transparent 80%)",
       'This Is Yeat': "radial-gradient(ellipse 120% 60% at 50% 0%, rgba(139, 92, 246, 0.45) 0%, rgba(99, 102, 241, 0.25) 40%, transparent 80%)",
-      'DJ': "radial-gradient(ellipse 120% 60% at 50% 0%, rgba(251, 146, 60, 0.45) 0%, rgba(249, 115, 22, 0.25) 40%, transparent 80%)",
       'LyfeStyle': "radial-gradient(ellipse 120% 60% at 50% 0%, rgba(16, 185, 129, 0.45) 0%, rgba(5, 150, 105, 0.25) 40%, transparent 80%)",
       'Tea Lovers': "radial-gradient(ellipse 120% 60% at 50% 0%, rgba(251, 191, 36, 0.45) 0%, rgba(245, 158, 11, 0.25) 40%, transparent 80%)",
       'From Sparta to Padre': "radial-gradient(ellipse 120% 60% at 50% 0%, rgba(239, 68, 68, 0.45) 0%, rgba(220, 38, 38, 0.25) 40%, transparent 80%)",
@@ -362,12 +380,65 @@ function MainContent() {
               <ArtistView onBack={closeArtistView} artist={selectedArtist} />
             ) : showCreatePlaylist ? (
               <CreatePlaylistView onBack={() => setShowCreatePlaylist(false)} />
-            ) : showAllSection ? (
+            ) : showAllSection === 'made' ? (
               <ShowAllView
-                title={showAllSection}
-                playlists={showAllSection === 'Made For You' ? madeForYou : recommendedPlaylists}
+                title={t('madeForYou')}
+                playlists={madeForYou}
                 onBack={() => setShowAllSection(null)}
               />
+            ) : showAllSection === 'recommended' ? (
+              <ShowAllView
+                title={t('recommendedPlaylists')}
+                playlists={recommendedPlaylists}
+                onBack={() => setShowAllSection(null)}
+              />
+            ) : showAllSection === 'apiTracks' ? (
+              <div className="flex-1 overflow-y-auto overflow-x-hidden pr-4 pb-4 pl-2 pt-8 space-y-6 sm:space-y-8 md:space-y-10">
+                <div className="flex items-center justify-between mb-4 sm:mb-6">
+                  <motion.h2
+                    className="section-heading-spotify text-2xl sm:text-3xl md:text-4xl gpu-accelerated"
+                    style={{ color: '#ffffff' }}
+                  >
+                    Треки из базы данных
+                  </motion.h2>
+                  <motion.button
+                    onClick={() => setShowAllSection(null)}
+                    className="show-all-button-spotify glass px-4 sm:px-5 md:px-6 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs sm:text-sm opacity-70 hover:opacity-100 fast-transition hover:scale-105 gpu-accelerated"
+                    style={{ color: '#ffffff' }}
+                  >
+                    {t('back') ?? 'Назад'}
+                  </motion.button>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
+                  {apiTracks.map((track, index) => (
+                    <div
+                      key={`${track.id || track.title}-${index}`}
+                      className="relative group cursor-pointer"
+                      onClick={() => setCurrentTrack(track, 'API Tracks')}
+                    >
+                      <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-gray-800 to-gray-900">
+                        <img
+                          src={track.image}
+                          alt={track.title}
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-white/5 group-hover:bg-white/12 transition-colors" />
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="w-12 h-12 bg-[#1ED760] rounded-full flex items-center justify-center shadow-lg">
+                            <svg className="w-6 h-6 text-black ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-2">
+                        <h3 className="text-white font-medium text-sm truncate">{track.title}</h3>
+                        <p className="text-gray-300 text-xs truncate">{track.artist}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : activeView === 'library' ? (
               <LibraryView />
             ) : activeView === 'settings' ? (
@@ -483,7 +554,7 @@ function MainContent() {
                         initial: false,
                         animate: false,
                       })}
-                      onClick={() => setShowAllSection('Made For You')}
+                      onClick={() => setShowAllSection('made')}
                       className="show-all-button-spotify hidden sm:block glass px-4 sm:px-5 md:px-6 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs sm:text-sm opacity-70 hover:opacity-100 fast-transition hover:scale-105 gpu-accelerated"
                       style={{
                         color: "#ffffff",
@@ -530,6 +601,23 @@ function MainContent() {
                       >
                         Треки из базы данных
                       </motion.h2>
+                      <motion.button
+                        {...(animations ? {
+                          initial: { opacity: 0 },
+                          animate: { opacity: 1 },
+                          transition: { delay: 0.15, duration: 0.3, ease: [0.25, 0.1, 0.25, 1] },
+                        } : {
+                          initial: false,
+                          animate: false,
+                        })}
+                        onClick={() => setShowAllSection('apiTracks')}
+                        className="show-all-button-spotify hidden sm:block glass px-4 sm:px-5 md:px-6 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs sm:text-sm opacity-70 hover:opacity-100 fast-transition hover:scale-105 gpu-accelerated"
+                        style={{
+                          color: "#ffffff",
+                        }}
+                      >
+                        {t('showAll')}
+                      </motion.button>
                     </div>
                     <div className={`grid ${compactView ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-1.5 sm:gap-2 md:gap-2' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4'}`}>
                       {isLoadingTracks ? (
@@ -552,7 +640,7 @@ function MainContent() {
                                 alt={track.title}
                                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                               />
-                              <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors" />
+                              <div className="absolute inset-0 bg-white/6 group-hover:bg-white/12 transition-colors" />
                               <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                 <div className="w-12 h-12 bg-[#1ED760] rounded-full flex items-center justify-center shadow-lg">
                                   <svg className="w-6 h-6 text-black ml-0.5" fill="currentColor" viewBox="0 0 24 24">
@@ -600,7 +688,7 @@ function MainContent() {
                         initial: false,
                         animate: false,
                       })}
-                      onClick={() => setShowAllSection('Recommended Playlists')}
+                      onClick={() => setShowAllSection('recommended')}
                       className="show-all-button-spotify hidden sm:block glass px-4 sm:px-5 md:px-6 py-2 md:py-2.5 rounded-lg md:rounded-xl text-xs sm:text-sm opacity-70 hover:opacity-100 fast-transition hover:scale-105 gpu-accelerated"
                       style={{
                         color: "#ffffff",

@@ -82,7 +82,6 @@ export function FullscreenPlayer() {
     isFullscreen,
     togglePlay,
     toggleFullscreen,
-    dominantColor,
     currentTime,
     duration,
     seek,
@@ -104,7 +103,6 @@ export function FullscreenPlayer() {
   const [rows, setRows] = useState<Row[]>([]);
   const [times, setTimes] = useState<number[]>([]);
   const [idx, setIdx] = useState(0);
-  const [drag, setDrag] = useState(false);
 
   const [showControls, setShowControls] = useState(false);
   const idleTimer = useRef<number | undefined>(undefined);
@@ -139,13 +137,15 @@ export function FullscreenPlayer() {
     requestAnimationFrame(setCurrentHeightVar);
   }
 
-  // Подсветка всей строки целиком
-  function updateActiveRow(time: number) {
+  // Подсветка всей строки целиком (включается на 0.3с раньше для плавности)
+  function updateActiveRow(time: number, forceActive: boolean = false) {
     const r = rowsR.current[idxR.current];
     if (!r || !curRef.current) return;
     
-    // Если время в пределах строки - подсвечиваем всю строку
-    if (time >= r.start && time < r.end) {
+    const earlyOffset = 0.3; // Включаем подсветку на 0.3с раньше
+    
+    // Если время в пределах строки или принудительно - подсвечиваем всю строку
+    if (forceActive || (time >= (r.start - earlyOffset) && time < r.end)) {
       curRef.current.classList.add('active');
     } else {
       curRef.current.classList.remove('active');
@@ -174,59 +174,88 @@ export function FullscreenPlayer() {
     if (!railRef.current || !curRef.current) return;
     
     animating.current = true;
-
     const rail = railRef.current;
+    const cur = curRef.current;
+    
+    // КРИТИЧНО: Получаем высоту ДО любых изменений DOM, чтобы избежать reflow
+    const gap = parseFloat(getComputedStyle(rail).gap || '0');
+    const curH = Math.round((cur.getBoundingClientRect().height || 0) + gap);
+    
     // Отменяем все анимации
     rail.getAnimations().forEach(a => a.cancel());
-
-    // Старая строка — мягкое исчезновение
-    curRef.current.classList.add('leaving');
-
-    // Используем двойной requestAnimationFrame для получения высоты без reflow и layout shift
+    
+    // Сбрасываем transform rail перед началом анимации
+    rail.style.transition = 'none';
+    rail.style.transform = 'translate3d(0, 0, 0)';
+    rail.style.willChange = 'transform';
+    
+    // Принудительный reflow для применения сброса transform
+    void rail.offsetHeight;
+    
+    // Старая строка — мягкое исчезновение (добавляем класс после получения высоты)
+    cur.classList.add('leaving');
+    
+    // Используем тройной RAF для гарантии, что браузер обработал все изменения
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-    const gap = parseFloat(getComputedStyle(rail).gap || '0');
-        const curH = Math.round((curRef.current?.getBoundingClientRect().height || 0) + gap);
-
-        // Используем CSS transition для плавности с GPU ускорением
-        // Apple Music style - быстрая и плавная анимация
-        rail.style.transition = 'transform 0.25s cubic-bezier(0.4, 0.0, 0.2, 1)';
-        rail.style.transform = `translate3d(0,-${curH}px,0)`;
-        rail.style.willChange = 'transform';
-
-      // После завершения анимации
-      const onTransitionEnd = () => {
-        rail.removeEventListener('transitionend', onTransitionEnd);
-        rail.style.transition = '';
-        rail.style.transform = 'translate3d(0,0,0)';
-
-        // Синхронно обновим индекс
-      idxR.current = newIndex;
-      setIdx(newIndex);
-
-        // Заполняем DOM новой тройкой
-      fillTrio(newIndex);
-      setCurrentHeightVar();
-
-        // Мгновенно инициируем подсветку по текущему времени
-      const nowTime = currentTime;
-        updateActiveRow(nowTime);
-
-      curRef.current?.classList.remove('leaving');
-      curRef.current?.classList.add('bump');
-        window.setTimeout(() => curRef.current?.classList.remove('bump'), 200);
-
-      animating.current = false;
-    };
-
-      rail.addEventListener('transitionend', onTransitionEnd, { once: true });
-      
-      // Fallback на случай если transitionend не сработает
-      setTimeout(() => {
-        if (animating.current) {
-          onTransitionEnd();
-        }
-      }, 450);
+        requestAnimationFrame(() => {
+          // Теперь применяем анимацию с GPU ускорением
+          rail.style.transition = 'transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1)';
+          rail.style.transform = `translate3d(0, -${curH}px, 0)`;
+          
+          // После завершения анимации
+          const onTransitionEnd = () => {
+            if (!animating.current) return;
+            
+            rail.removeEventListener('transitionend', onTransitionEnd);
+            
+            // Сбрасываем transform rail синхронно
+            rail.style.transition = 'none';
+            rail.style.transform = 'translate3d(0, 0, 0)';
+            rail.style.willChange = 'auto'; // Сбрасываем willChange для оптимизации
+            
+            // Принудительный reflow для применения сброса
+            void rail.offsetHeight;
+            
+            // Синхронно обновим индекс
+            idxR.current = newIndex;
+            setIdx(newIndex);
+            
+            // Убираем класс leaving перед обновлением контента
+            cur.classList.remove('leaving');
+            
+            // Заполняем DOM новой тройкой
+            fillTrio(newIndex);
+            setCurrentHeightVar();
+            
+            // КРИТИЧНО: Применяем подсветку СРАЗУ после обновления контента
+            // Используем forceActive=true чтобы гарантировать подсветку для коротких строк
+            const nowTime = currentTime;
+            updateActiveRow(nowTime, true); // Принудительно включаем подсветку
+            
+            // Ждем минимальное обновление DOM перед добавлением bump
+            requestAnimationFrame(() => {
+              // Повторно применяем подсветку (уже с проверкой времени)
+              updateActiveRow(currentTime);
+              
+              // Добавляем bump для плавного появления
+              cur.classList.add('bump');
+              window.setTimeout(() => {
+                cur.classList.remove('bump');
+                animating.current = false;
+              }, 300);
+            });
+          };
+          
+          rail.addEventListener('transitionend', onTransitionEnd, { once: true });
+          
+          // Fallback на случай если transitionend не сработает
+          setTimeout(() => {
+            if (animating.current) {
+              onTransitionEnd();
+            }
+          }, 400);
+        });
       });
     });
   }
@@ -337,7 +366,7 @@ export function FullscreenPlayer() {
     if (!isFullscreen || !timesR.current.length) return;
     
     // Используем RAF напрямую для 120Hz поддержки
-    const update = (timestamp: number) => {
+    const update = () => {
       const ts = timesR.current;
     const now = Date.now();
       
@@ -390,24 +419,136 @@ export function FullscreenPlayer() {
     if (titleEl) titleEl.textContent = currentTrack.title;
     if (artistEl) artistEl.textContent = currentTrack.artist;
 
-    // accent из обложки
+    // Функция для усиления цвета (определяем до использования)
+    const enhanceColor = (r: number, g: number, b: number): { r: number; g: number; b: number } => {
+      // Переводим в HSL для работы с насыщенностью
+      const max = Math.max(r, g, b) / 255;
+      const min = Math.min(r, g, b) / 255;
+      const l = (max + min) / 2;
+      const d = max - min;
+      let s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+      let h = 0;
+      
+      if (d !== 0) {
+        if (max === r / 255) {
+          h = ((g / 255 - b / 255) / d + (g < b ? 6 : 0)) / 6;
+        } else if (max === g / 255) {
+          h = ((b / 255 - r / 255) / d + 2) / 6;
+        } else {
+          h = ((r / 255 - g / 255) / d + 4) / 6;
+        }
+      }
+      
+      // Усиливаем насыщенность (но не слишком)
+      s = Math.min(1, s * 1.3);
+      
+      // Конвертируем обратно в RGB
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+      const m = l - c / 2;
+      
+      let newR = 0, newG = 0, newB = 0;
+      
+      if (h < 1/6) {
+        newR = c; newG = x; newB = 0;
+      } else if (h < 2/6) {
+        newR = x; newG = c; newB = 0;
+      } else if (h < 3/6) {
+        newR = 0; newG = c; newB = x;
+      } else if (h < 4/6) {
+        newR = 0; newG = x; newB = c;
+      } else if (h < 5/6) {
+        newR = x; newG = 0; newB = c;
+      } else {
+        newR = c; newG = 0; newB = x;
+      }
+      
+      return {
+        r: Math.round((newR + m) * 255),
+        g: Math.round((newG + m) * 255),
+        b: Math.round((newB + m) * 255)
+      };
+    };
+
+    // Улучшенное извлечение цветов из обложки как в Apple Music
     const img = new Image();
+    img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
-        const s = 48, c = document.createElement('canvas');
+        const s = 128; // Увеличиваем размер для лучшего качества
+        const c = document.createElement('canvas');
         c.width = s;
         c.height = s;
         const ctx = c.getContext('2d', { willReadFrequently: true })!;
         ctx.drawImage(img, 0, 0, s, s);
         const d = ctx.getImageData(0, 0, s, s).data;
-        let r = 0, g = 0, b = 0, n = 0;
-        for (let i = 0; i < d.length; i += 4) {
-          r += d[i];
-          g += d[i + 1];
-          b += d[i + 2];
-          n++;
+        
+        // Извлекаем яркие и насыщенные цвета (как в Apple Music)
+        const colors: Array<{ r: number; g: number; b: number; brightness: number; saturation: number }> = [];
+        
+        for (let i = 0; i < d.length; i += 16) { // Берем каждый 4-й пиксель для производительности
+          const r = d[i];
+          const g = d[i + 1];
+          const b = d[i + 2];
+          
+          // Вычисляем яркость и насыщенность
+          const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          const saturation = max === 0 ? 0 : (max - min) / max;
+          
+          // Фильтруем слишком темные и неинтересные цвета
+          if (brightness > 30 && brightness < 240 && saturation > 0.2) {
+            colors.push({ r, g, b, brightness, saturation });
+          }
         }
-        document.documentElement.style.setProperty('--lyrics-accent', `rgb(${(r / n) | 0}, ${(g / n) | 0}, ${(b / n) | 0})`);
+        
+        if (colors.length > 0) {
+          // Сортируем по яркости и насыщенности (предпочитаем яркие и насыщенные)
+          colors.sort((a, b) => {
+            const scoreA = a.brightness * 0.6 + a.saturation * 100 * 0.4;
+            const scoreB = b.brightness * 0.6 + b.saturation * 100 * 0.4;
+            return scoreB - scoreA;
+          });
+          
+          // Берем топ-5 цветов и усредняем их для более богатого результата
+          const topColors = colors.slice(0, Math.min(5, colors.length));
+          let avgR = 0, avgG = 0, avgB = 0;
+          topColors.forEach(color => {
+            avgR += color.r;
+            avgG += color.g;
+            avgB += color.b;
+          });
+          
+          const n = topColors.length;
+          const finalR = Math.round(avgR / n);
+          const finalG = Math.round(avgG / n);
+          const finalB = Math.round(avgB / n);
+          
+          // Усиливаем насыщенность для более яркого эффекта
+          const enhanced = enhanceColor(finalR, finalG, finalB);
+          
+          document.documentElement.style.setProperty('--lyrics-accent', `rgb(${enhanced.r}, ${enhanced.g}, ${enhanced.b})`);
+          
+          // Устанавливаем дополнительные цвета для фона
+          document.documentElement.style.setProperty('--bg-color-1', `rgb(${finalR}, ${finalG}, ${finalB})`);
+          document.documentElement.style.setProperty('--bg-color-2', `rgb(${enhanced.r}, ${enhanced.g}, ${enhanced.b})`);
+        } else {
+          // Fallback на средний цвет
+          let r = 0, g = 0, b = 0, n = 0;
+          for (let i = 0; i < d.length; i += 4) {
+            r += d[i];
+            g += d[i + 1];
+            b += d[i + 2];
+            n++;
+          }
+          const avgR = (r / n) | 0;
+          const avgG = (g / n) | 0;
+          const avgB = (b / n) | 0;
+          document.documentElement.style.setProperty('--lyrics-accent', `rgb(${avgR}, ${avgG}, ${avgB})`);
+          document.documentElement.style.setProperty('--bg-color-1', `rgb(${avgR}, ${avgG}, ${avgB})`);
+          document.documentElement.style.setProperty('--bg-color-2', `rgb(${avgR}, ${avgG}, ${avgB})`);
+        }
       } catch { }
     };
     img.src = coverUrl;
@@ -452,11 +593,11 @@ export function FullscreenPlayer() {
       setIdx(0);
       idxR.current = 0;
       fillTrio(0);
-      // Даём время DOM элементам создаться перед вызовом progressChars
+      // Обновляем активную строку после инициализации
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           const nowTime = currentTime || 0;
-          progressChars(nowTime + 0.001);
+          updateActiveRow(nowTime);
         });
       });
     }
@@ -542,10 +683,6 @@ export function FullscreenPlayer() {
                       step={0.001}
                       value={currentTime || 0}
                       onChange={(e) => onSeek(parseFloat(e.target.value))}
-                      onMouseDown={() => setDrag(true)}
-                      onMouseUp={() => setDrag(false)}
-                      onTouchStart={() => setDrag(true)}
-                      onTouchEnd={() => setDrag(false)}
                     />
                   </div>
 
@@ -638,3 +775,5 @@ export function FullscreenPlayer() {
     </AnimatePresence>
   );
 }
+
+
