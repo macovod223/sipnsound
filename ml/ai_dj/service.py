@@ -1,14 +1,3 @@
-"""
-Flask-сервис для AI DJ рекомендаций (полностью доработанная версия)
-
-РЕАЛИЗОВАННЫЕ УЛУЧШЕНИЯ:
-- Скрипт обучения модели (train_model.py)
-- Использование реальных дат прослушивания
-- Кэширование результатов
-- Улучшенный алгоритм профиля (частота прослушивания)
-- Метрики качества
-"""
-
 from flask import Flask, request, jsonify
 import pickle
 import numpy as np
@@ -16,7 +5,6 @@ from pathlib import Path
 from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
 import logging
-from functools import lru_cache
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 from collections import defaultdict

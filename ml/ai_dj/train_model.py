@@ -1,14 +1,3 @@
-"""
-Скрипт обучения AI DJ модели.
-Создает embeddings для всех треков из БД.
-
-Использование:
-    python ml/ai_dj/train_model.py <DATABASE_URL> [output_dir]
-
-Пример:
-    python ml/ai_dj/train_model.py "postgresql://user:pass@localhost:5432/db" ml/ai_dj/data
-"""
-
 import sys
 import os
 from pathlib import Path
@@ -19,7 +8,6 @@ from datetime import datetime
 import logging
 from typing import Dict, List, Tuple
 
-# ML библиотеки
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -34,10 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def connect_to_db(database_url: str):
-    """Подключается к PostgreSQL БД"""
     try:
-        # Убираем параметр schema из URL, так как psycopg2 его не поддерживает
-        # Prisma использует ?schema=public, но psycopg2 работает без этого параметра
         clean_url = database_url.split('?')[0] if '?' in database_url else database_url
         conn = psycopg2.connect(clean_url)
         logger.info("Подключение к БД установлено")
@@ -207,7 +192,7 @@ def save_model(
     Args:
         embeddings: Матрица embeddings
         tracks_df: DataFrame с треками
-        track_id_to_idx: Маппинг UUID → индекс
+        track_id_to_idx: Маппинг UUID – индекс
         output_dir: Директория для сохранения
     """
     output_path = Path(output_dir)
@@ -215,12 +200,12 @@ def save_model(
     
     logger.info(f"Сохраняю модель в {output_path}...")
     
-    # Сохраняем embeddings
+    # Сохраняем эмбеддинги
     embeddings_path = output_path / "db_embeddings.npy"
     np.save(embeddings_path, embeddings)
     logger.info(f"Embeddings сохранены: {embeddings_path}")
     
-    # Сохраняем DataFrame
+    # Сохраняем датафрейм
     tracks_path = output_path / "db_tracks.pkl"
     tracks_df.to_pickle(tracks_path)
     logger.info(f"DataFrame сохранен: {tracks_path}")
@@ -231,7 +216,7 @@ def save_model(
         pickle.dump(track_id_to_idx, f)
     logger.info(f"Маппинг сохранен: {mapping_path}")
     
-    # Сохраняем векторizer (для будущего использования)
+    # Сохраняем векторизатор (для будущего использования)
     vectorizer_path = output_path / "db_vectorizer.pkl"
     # Векторизатор не сохраняем, т.к. он не используется в runtime
     logger.info(f"Модель сохранена успешно!")
@@ -274,7 +259,7 @@ def main():
         # Создаем embeddings
         embeddings = create_embeddings(text_features, tracks_df, embedding_dim=512)
         
-        # Создаем маппинг UUID → индекс
+        # Создаем маппинг UUID – индекс
         track_id_to_idx = {str(track_id): idx for idx, track_id in enumerate(tracks_df['id'])}
         logger.info(f"Маппинг создан: {len(track_id_to_idx)} треков")
         

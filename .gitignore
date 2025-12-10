@@ -69,3 +69,26 @@ dist-ssr
 
 # Cursor
 .cursor/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ML Service logs
+ml/ai_dj/service.log
+ml/ai_dj/*.log
+
+# ML Model data (can be regenerated, but can be committed for convenience)
+# Uncomment if you want to exclude model files from git:
+# ml/ai_dj/data/*.npy
+# ml/ai_dj/data/*.pkl
+
+# Personal quick start guide
+QUICK_START.md
