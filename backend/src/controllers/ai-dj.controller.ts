@@ -14,7 +14,7 @@ export const getAIDJSession = asyncHandler(async (req: Request, res: Response): 
     : DEFAULT_LIMIT;
 
   try {
-    const userId = (req as any).userId;
+    const userId = req.user?.id;
 
     const shuffle = <T,>(arr: T[]) => {
       const copy = [...arr];
@@ -29,6 +29,7 @@ export const getAIDJSession = asyncHandler(async (req: Request, res: Response): 
     let userHistory: string[] = [];
     let preferredGenres: string[] = [];
     let preferredArtists: string[] = [];
+    let historyWithDates: Array<{ id: string; playedAt: string }> = [];
 
     if (userId) {
       const [liked, history] = await Promise.all([
@@ -53,11 +54,34 @@ export const getAIDJSession = asyncHandler(async (req: Request, res: Response): 
         }),
       ]);
 
-      // Формируем историю для ML сервиса (UUID треков)
+      // Формируем историю для ML сервиса (UUID треков + даты прослушивания)
+      // Создаем маппинг trackId -> playedAt для использования в ML модели
+      const trackPlayDates = new Map<string, string>();
+      
+      // Добавляем даты из истории прослушиваний
+      history.forEach(h => {
+        if (h.track?.id && h.playedAt) {
+          trackPlayDates.set(h.track.id, h.playedAt.toISOString());
+        }
+      });
+      
+      // Добавляем лайки (используем текущую дату как приближение)
+      liked.forEach(l => {
+        if (l.track?.id && !trackPlayDates.has(l.track.id)) {
+          trackPlayDates.set(l.track.id, new Date().toISOString());
+        }
+      });
+      
       const allTracks = [...liked.map(l => l.track), ...history.map(h => h.track)];
       userHistory = allTracks
         .filter(t => t && t.id)
         .map(t => t.id);
+      
+      // Формируем историю с датами для ML сервиса
+      historyWithDates = userHistory.map(trackId => ({
+        id: trackId,
+        playedAt: trackPlayDates.get(trackId) || new Date().toISOString()
+      }));
 
       // Собираем предпочитаемые жанры и артисты
       const genreCount = new Map<string, number>();
@@ -87,38 +111,56 @@ export const getAIDJSession = asyncHandler(async (req: Request, res: Response): 
     let mlRecommendations: any[] = [];
     let usingML = false;
 
+    logger.info(`[AI DJ] Запрос к ML сервису: ${ML_SERVICE_URL}/recommend`);
+    logger.info(`[AI DJ] Параметры: history=${userHistory.length}, genres=${preferredGenres.length}, artists=${preferredArtists.length}, limit=${limit}`);
+
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
 
+      const requestBody = {
+        history: userHistory.slice(0, 20),
+        historyWithDates: historyWithDates.slice(0, 20),
+        genres: preferredGenres,
+        artists: preferredArtists,
+        limit,
+      };
+      
+      logger.info(`[AI DJ] Отправка запроса к ML сервису: ${JSON.stringify({ ...requestBody, history: requestBody.history.length, historyWithDates: requestBody.historyWithDates.length })}`);
+
       const mlResponse = await fetch(`${ML_SERVICE_URL}/recommend`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          history: userHistory.slice(0, 10),
-          genres: preferredGenres,
-          artists: preferredArtists,
-          limit,
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
       clearTimeout(timeout);
 
+      logger.info(`[AI DJ] ML сервис ответил: ${mlResponse.status} ${mlResponse.statusText}`);
+
       if (mlResponse.ok) {
         const mlData: any = await mlResponse.json();
         mlRecommendations = mlData.recommendations || [];
         usingML = mlRecommendations.length > 0;
-        logger.info(`ML service returned ${mlRecommendations.length} recommendations`);
+        logger.info(`[AI DJ] ML service returned ${mlRecommendations.length} recommendations, method: ${mlData.method || 'unknown'}`);
+        logger.info(`[AI DJ] First 3 recommendations: ${JSON.stringify(mlRecommendations.slice(0, 3).map((r: any) => ({ id: r.id, title: r.title, artist: r.artist })))}`);
+      } else {
+        const errorText = await mlResponse.text();
+        logger.error(`[AI DJ] ML service error: ${mlResponse.status} ${mlResponse.statusText} - ${errorText}`);
       }
     } catch (mlError: any) {
       if (mlError.name !== 'AbortError') {
-        logger.warn(`ML service unavailable: ${mlError.message}`);
+        logger.warn(`[AI DJ] ML service unavailable: ${mlError.message}`);
+        logger.warn(`[AI DJ] ML service URL: ${ML_SERVICE_URL}`);
+      } else {
+        logger.warn(`[AI DJ] ML service request timeout`);
       }
     }
 
     // Если ML сервис дал рекомендации, ищем эти треки в нашей БД
     if (usingML && mlRecommendations.length > 0) {
+      logger.info(`[AI DJ] Поиск ${mlRecommendations.length} треков в БД по рекомендациям ML`);
       const tracks = [];
 
       for (const rec of mlRecommendations.slice(0, limit * 2)) {
@@ -140,7 +182,14 @@ export const getAIDJSession = asyncHandler(async (req: Request, res: Response): 
               genre: { select: { id: true, name: true, color: true } },
             },
           });
-          if (track) foundTracks = [track];
+          if (track) {
+            foundTracks = [track];
+            logger.debug(`[AI DJ] Найден трек: ${track.title} (${track.id})`);
+          } else {
+            logger.warn(`[AI DJ] Трек не найден в БД: ${rec.id} (${rec.title || 'unknown'})`);
+          }
+        } else {
+          logger.warn(`[AI DJ] Рекомендация без ID: ${JSON.stringify(rec)}`);
         }
 
         if (foundTracks.length > 0) {
@@ -149,12 +198,16 @@ export const getAIDJSession = asyncHandler(async (req: Request, res: Response): 
         }
       }
 
+      logger.info(`[AI DJ] Найдено треков в БД: ${tracks.length} из ${mlRecommendations.length} рекомендаций`);
+
       if (tracks.length > 0) {
         return res.json({
           tracks: tracks.slice(0, limit),
           source: 'ml-service',
           matched: tracks.length,
         });
+      } else {
+        logger.warn(`[AI DJ] Ни один трек из рекомендаций не найден в БД, используем fallback`);
       }
     }
 

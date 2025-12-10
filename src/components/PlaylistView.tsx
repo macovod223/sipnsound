@@ -68,6 +68,7 @@ export function PlaylistView() {
               audioUrl: resolveAudioUrl(track.audioUrl || track.audioPath),
               lyricsUrl: track.lyricsPath,
               playsCount: track.playsCount || 0,
+              isExplicit: track.isExplicit ?? false,
               album: track.album?.title || 'Unknown Album',
             }));
             setPlaylistTracks(formattedTracks);
@@ -102,6 +103,7 @@ export function PlaylistView() {
                 audioUrl: resolveAudioUrl(track.audioUrl || track.audioPath),
                 lyricsUrl: track.lyricsUrl || track.lyricsPath,
                 playsCount: track.playsCount || 0,
+                isExplicit: track.isExplicit ?? false,
                 album: typeof track.album === 'string' ? track.album : (track.album?.title || 'Unknown Album'),
                 albumId: typeof track.album === 'object' ? track.album?.id : undefined,
                 albumType: typeof track.album === 'object' ? track.album?.type : undefined,
@@ -218,6 +220,7 @@ export function PlaylistView() {
                     audioUrl: resolveAudioUrl(track.audioUrl || track.audioPath),
                     lyricsUrl: track.lyricsPath,
                     playsCount: track.playsCount || 0,
+                    isExplicit: track.isExplicit ?? false,
                     album: albumTitle,
                   };
                 });
@@ -231,6 +234,7 @@ export function PlaylistView() {
                   genre: track.genre || 'Unknown',
                   duration: track.duration || 0,
                   audioUrl: track.audioUrl,
+                  isExplicit: track.isExplicit ?? false,
                   playlistTitle: selectedPlaylist.title,
                 })));
                 return;
@@ -281,6 +285,7 @@ export function PlaylistView() {
         duration: typeof song.duration === 'number' ? song.duration : (typeof song.duration === 'string' ? parseInt(song.duration) : 0),
         audioUrl: song.audioUrl ? resolveAudioUrl(song.audioUrl) : undefined,
         lyricsUrl: song.lyricsUrl,
+        isExplicit: song.isExplicit ?? false,
         playlistTitle: selectedPlaylist.title,
       }, selectedPlaylist.title);
     }
@@ -299,6 +304,7 @@ export function PlaylistView() {
         duration: typeof song.duration === 'number' ? song.duration : (typeof song.duration === 'string' ? parseInt(song.duration) : 0),
         audioUrl: song.audioUrl ? resolveAudioUrl(song.audioUrl) : undefined,
         lyricsUrl: song.lyricsUrl,
+        isExplicit: song.isExplicit ?? false,
         playlistTitle: selectedPlaylist.title,
       }, selectedPlaylist.title);
     }
@@ -321,6 +327,7 @@ export function PlaylistView() {
         duration: typeof firstSong.duration === 'number' ? firstSong.duration : (typeof firstSong.duration === 'string' ? parseInt(firstSong.duration) : 0),
         audioUrl: firstSong.audioUrl,
         lyricsUrl: firstSong.lyricsUrl,
+        isExplicit: firstSong.isExplicit ?? false,
         playlistTitle: selectedPlaylist.title,
       }, selectedPlaylist.title);
     }
@@ -328,9 +335,9 @@ export function PlaylistView() {
 
   return (
     <motion.div
-      initial={animations ? { opacity: 0, x: 50 } : false}
-      animate={animations ? { opacity: 1, x: 0 } : false}
-      exit={animations ? { opacity: 0, x: 50 } : false}
+      initial={animations ? { opacity: 0, x: 50 } : undefined}
+      animate={animations ? { opacity: 1, x: 0 } : undefined}
+      exit={animations ? { opacity: 0, x: 50 } : undefined}
       transition={animations ? { duration: 0.4, ease: 'easeOut' } : { duration: 0 }}
       className="flex-1 flex flex-col gap-3 sm:gap-4 md:gap-6 min-w-0 h-full overflow-hidden"
     >

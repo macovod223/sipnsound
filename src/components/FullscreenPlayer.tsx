@@ -154,18 +154,34 @@ export function FullscreenPlayer() {
 
   function fillTrio(i: number) {
     const r = rowsR.current;
-    if (!curRef.current || !n1Ref.current || !n2Ref.current || !n3Ref.current) return;
+    const cur = curRef.current;
+    const n1 = n1Ref.current;
+    const n2 = n2Ref.current;
+    const n3 = n3Ref.current;
+    
+    // Проверяем что все элементы существуют и не размонтированы
+    if (!cur || !n1 || !n2 || !n3) return;
     if (!r[i]) return;
     
-    inflateCurrent(r[i]);
-    renderText(n1Ref.current, r[i + 1]?.text ?? '');
-    renderText(n2Ref.current, r[i + 2]?.text ?? '');
-    renderText(n3Ref.current, r[i + 3]?.text ?? '');
-
-    curRef.current.dataset.idx = String(i);
-    n1Ref.current.dataset.idx = String(i + 1);
-    n2Ref.current.dataset.idx = String(i + 2);
-    n3Ref.current.dataset.idx = String(i + 3);
+    // Проверяем что элементы все еще в DOM
+    if (!cur.isConnected || !n1.isConnected || !n2.isConnected || !n3.isConnected) {
+      return;
+    }
+    
+    try {
+      inflateCurrent(r[i]);
+      renderText(n1, r[i + 1]?.text ?? '');
+      renderText(n2, r[i + 2]?.text ?? '');
+      renderText(n3, r[i + 3]?.text ?? '');
+      
+      cur.dataset.idx = String(i);
+      n1.dataset.idx = String(i + 1);
+      n2.dataset.idx = String(i + 2);
+      n3.dataset.idx = String(i + 3);
+    } catch (error) {
+      console.error('[FULLSCREEN] Error in fillTrio:', error);
+      // Игнорируем ошибки при обновлении DOM
+    }
   }
 
   // ===== плавный слайд вверх; оптимизированная анимация без дерганий =====
@@ -173,27 +189,28 @@ export function FullscreenPlayer() {
     if (animating.current) return;
     if (!railRef.current || !curRef.current) return;
     
-    animating.current = true;
-    const rail = railRef.current;
-    const cur = curRef.current;
-    
-    // КРИТИЧНО: Получаем высоту ДО любых изменений DOM, чтобы избежать reflow
-    const gap = parseFloat(getComputedStyle(rail).gap || '0');
-    const curH = Math.round((cur.getBoundingClientRect().height || 0) + gap);
-    
-    // Отменяем все анимации
-    rail.getAnimations().forEach(a => a.cancel());
-    
-    // Сбрасываем transform rail перед началом анимации
-    rail.style.transition = 'none';
-    rail.style.transform = 'translate3d(0, 0, 0)';
-    rail.style.willChange = 'transform';
-    
-    // Принудительный reflow для применения сброса transform
-    void rail.offsetHeight;
-    
-    // Старая строка — мягкое исчезновение (добавляем класс после получения высоты)
-    cur.classList.add('leaving');
+    try {
+      animating.current = true;
+      const rail = railRef.current;
+      const cur = curRef.current;
+      
+      // КРИТИЧНО: Получаем высоту ДО любых изменений DOM, чтобы избежать reflow
+      const gap = parseFloat(getComputedStyle(rail).gap || '0');
+      const curH = Math.round((cur.getBoundingClientRect().height || 0) + gap);
+      
+      // Отменяем все анимации
+      rail.getAnimations().forEach(a => a.cancel());
+      
+      // Сбрасываем transform rail перед началом анимации
+      rail.style.transition = 'none';
+      rail.style.transform = 'translate3d(0, 0, 0)';
+      rail.style.willChange = 'transform';
+      
+      // Принудительный reflow для применения сброса transform
+      void rail.offsetHeight;
+      
+      // Старая строка – мягкое исчезновение (добавляем класс после получения высоты)
+      if (cur) cur.classList.add('leaving');
     
     // Используем тройной RAF для гарантии, что браузер обработал все изменения
     requestAnimationFrame(() => {
@@ -207,57 +224,105 @@ export function FullscreenPlayer() {
           const onTransitionEnd = () => {
             if (!animating.current) return;
             
-            rail.removeEventListener('transitionend', onTransitionEnd);
-            
-            // Сбрасываем transform rail синхронно
-            rail.style.transition = 'none';
-            rail.style.transform = 'translate3d(0, 0, 0)';
-            rail.style.willChange = 'auto'; // Сбрасываем willChange для оптимизации
-            
-            // Принудительный reflow для применения сброса
-            void rail.offsetHeight;
-            
-            // Синхронно обновим индекс
-            idxR.current = newIndex;
-            setIdx(newIndex);
-            
-            // Убираем класс leaving перед обновлением контента
-            cur.classList.remove('leaving');
-            
-            // Заполняем DOM новой тройкой
-            fillTrio(newIndex);
-            setCurrentHeightVar();
-            
-            // КРИТИЧНО: Применяем подсветку СРАЗУ после обновления контента
-            // Используем forceActive=true чтобы гарантировать подсветку для коротких строк
-            const nowTime = currentTime;
-            updateActiveRow(nowTime, true); // Принудительно включаем подсветку
-            
-            // Ждем минимальное обновление DOM перед добавлением bump
-            requestAnimationFrame(() => {
-              // Повторно применяем подсветку (уже с проверкой времени)
-              updateActiveRow(currentTime);
-              
-              // Добавляем bump для плавного появления
-              cur.classList.add('bump');
-              window.setTimeout(() => {
-                cur.classList.remove('bump');
+            try {
+              // Проверяем что rail все еще существует и в DOM
+              if (!rail || !rail.isConnected) {
                 animating.current = false;
-              }, 300);
-            });
+                return;
+              }
+              
+              // Отменяем fallback timeout если он еще не выполнился
+              if ((rail as any)._fallbackTimeout) {
+                clearTimeout((rail as any)._fallbackTimeout);
+                delete (rail as any)._fallbackTimeout;
+              }
+              
+              rail.removeEventListener('transitionend', onTransitionEnd);
+              
+              // Проверяем что элементы еще существуют
+              if (!curRef.current || !curRef.current.isConnected) {
+                animating.current = false;
+                return;
+              }
+              
+              // Сбрасываем transform rail синхронно
+              rail.style.transition = 'none';
+              rail.style.transform = 'translate3d(0, 0, 0)';
+              rail.style.willChange = 'auto';
+              
+              // Принудительный reflow для применения сброса
+              void rail.offsetHeight;
+              
+              // Синхронно обновим индекс
+              idxR.current = newIndex;
+              setIdx(newIndex);
+              
+              // Убираем класс leaving перед обновлением контента
+              if (curRef.current && curRef.current.isConnected) {
+                curRef.current.classList.remove('leaving');
+              }
+              
+              // Заполняем DOM новой тройкой
+              fillTrio(newIndex);
+              setCurrentHeightVar();
+              
+              // КРИТИЧНО: Применяем подсветку СРАЗУ после обновления контента
+              const nowTime = currentTime;
+              updateActiveRow(nowTime, true);
+              
+              // Ждем минимальное обновление DOM перед добавлением bump
+              requestAnimationFrame(() => {
+                if (!curRef.current || !curRef.current.isConnected) {
+                  animating.current = false;
+                  return;
+                }
+                
+                // Повторно применяем подсветку
+                updateActiveRow(currentTime);
+                
+                // Добавляем bump для плавного появления
+                curRef.current.classList.add('bump');
+                window.setTimeout(() => {
+                  if (curRef.current && curRef.current.isConnected) {
+                    curRef.current.classList.remove('bump');
+                  }
+                  animating.current = false;
+                }, 300);
+              });
+            } catch (error) {
+              console.error('[FULLSCREEN] Error in onTransitionEnd:', error);
+              animating.current = false;
+            }
           };
           
           rail.addEventListener('transitionend', onTransitionEnd, { once: true });
           
           // Fallback на случай если transitionend не сработает
-          setTimeout(() => {
+          const fallbackTimeout = setTimeout(() => {
             if (animating.current) {
-              onTransitionEnd();
+              try {
+                // Проверяем что элементы все еще существуют перед вызовом onTransitionEnd
+                if (rail && rail.isConnected && curRef.current && curRef.current.isConnected) {
+                  onTransitionEnd();
+                } else {
+                  animating.current = false;
+                }
+              } catch (error) {
+                console.error('[FULLSCREEN] Error in transitionEnd fallback:', error);
+                animating.current = false;
+              }
             }
           }, 400);
+          
+          // Сохраняем timeout ID для возможной отмены
+          (rail as any)._fallbackTimeout = fallbackTimeout;
         });
       });
     });
+    } catch (error) {
+      console.error('[FULLSCREEN] Error in slideToNext:', error);
+      animating.current = false;
+    }
   }
 
   function jumpTo(index: number) {
@@ -329,14 +394,17 @@ export function FullscreenPlayer() {
     viewport.addEventListener('touchend', onTouchEnd as unknown as EventListener, { passive: false });
 
     return () => {
-      n1.removeEventListener('click', onRowClick);
-      n2.removeEventListener('click', onRowClick);
-      n3.removeEventListener('click', onRowClick);
-      cur.removeEventListener('click', onRowClick);
-      viewport.removeEventListener('wheel', onWheel as unknown as EventListener);
-      viewport.removeEventListener('touchstart', onTouchStart as unknown as EventListener);
-      viewport.removeEventListener('touchmove', onTouchMove as unknown as EventListener);
-      viewport.removeEventListener('touchend', onTouchEnd as unknown as EventListener);
+      // Проверяем что элементы все еще существуют перед удалением слушателей
+      if (n1 && n1.isConnected) n1.removeEventListener('click', onRowClick);
+      if (n2 && n2.isConnected) n2.removeEventListener('click', onRowClick);
+      if (n3 && n3.isConnected) n3.removeEventListener('click', onRowClick);
+      if (cur && cur.isConnected) cur.removeEventListener('click', onRowClick);
+      if (viewport && viewport.isConnected) {
+        viewport.removeEventListener('wheel', onWheel as unknown as EventListener);
+        viewport.removeEventListener('touchstart', onTouchStart as unknown as EventListener);
+        viewport.removeEventListener('touchmove', onTouchMove as unknown as EventListener);
+        viewport.removeEventListener('touchend', onTouchEnd as unknown as EventListener);
+      }
     };
   }, [isFullscreen]);
 
@@ -584,6 +652,8 @@ export function FullscreenPlayer() {
     };
 
     const parsed = await loadLyrics();
+    // Сбрасываем флаг анимации перед обновлением состояния
+    animating.current = false;
     setRows(parsed);
     rowsR.current = parsed;
     const ts = parsed.map(r => r.start);
@@ -592,17 +662,22 @@ export function FullscreenPlayer() {
     if (parsed.length) {
       setIdx(0);
       idxR.current = 0;
-      fillTrio(0);
-      // Обновляем активную строку после инициализации
+      // Небольшая задержка перед fillTrio для гарантии, что DOM готов
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const nowTime = currentTime || 0;
-          updateActiveRow(nowTime);
-        });
+        if (!animating.current && railRef.current && curRef.current) {
+          fillTrio(0);
+          // Обновляем активную строку после инициализации
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const nowTime = currentTime || 0;
+              updateActiveRow(nowTime);
+            });
+          });
+        }
       });
     }
     })();
-  }, [currentTrack, isFullscreen]);
+  }, [currentTrack?.id, isFullscreen]);
 
   // ===== обновление прогресс-бара =====
   useEffect(() => {
@@ -690,8 +765,8 @@ export function FullscreenPlayer() {
 
                   <div className="lyrics-hud">
                     <div className="lyrics-meta">
-                      <div className="lyrics-title" id="lyrics-title">
-                        {currentTrack.title}
+                      <div className="lyrics-title min-w-0" id="lyrics-title">
+                        <span className="flex-1 min-w-0" style={{ whiteSpace: 'nowrap', overflow: 'visible' }}>{currentTrack.title}</span>
                       </div>
                       <button
                         onClick={() => {

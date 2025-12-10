@@ -15,6 +15,7 @@ import userRoutes from './routes/user.routes';
 import adminRoutes from './routes/admin.routes';
 import artistRoutes from './routes/artist.routes';
 import genreRoutes from './routes/genre.routes';
+import aiDjRoutes from './routes/ai-dj.routes';
 
 // Загрузка переменных окружения
 dotenv.config();
@@ -51,6 +52,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/artists', artistRoutes);
 app.use('/api/genres', genreRoutes);
+app.use('/api/ai-dj', aiDjRoutes);
 
 // 404 handler (catch-all для всех необработанных маршрутов)
 app.use((_req, res) => {
@@ -62,9 +64,9 @@ app.use(errorHandler);
 
 // Запуск сервера
 app.listen(PORT, () => {
-  logger.info(`🚀 Server is running on http://localhost:${PORT}`);
-  logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  logger.info(`🎵 Sip&Sound Backend API v1.0.0`);
+  logger.info(`Server is running on http://localhost:${PORT}`);
+  logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  logger.info(`Sip&Sound Backend API v1.0.0`);
 });
 
 export default app;

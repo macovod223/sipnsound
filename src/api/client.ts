@@ -425,6 +425,13 @@ class ApiClient {
     });
   }
 
+  // AI DJ
+  async getAIDJSession(limit: number = 25): Promise<{ tracks: Track[]; source?: string; matched?: number }> {
+    const queryParams = new URLSearchParams();
+    queryParams.append('limit', limit.toString());
+    return this.request<{ tracks: Track[]; source?: string; matched?: number }>(`/api/ai-dj/session?${queryParams.toString()}`);
+  }
+
   // Проверка подключения к API
   async healthCheck(): Promise<{ status: string; timestamp: string }> {
     return this.request<{ status: string; timestamp: string }>('/health');

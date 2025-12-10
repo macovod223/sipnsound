@@ -3,7 +3,7 @@ import { ArrowLeft, Plus, Music, Image as ImageIcon, Search, X, Edit2, Trash2 } 
 import { useSettings } from './SettingsContext';
 import { useState, useEffect, useRef } from 'react';
 import { Track } from './PlayerContext';
-import { ImageWithFallback } from '@/components/timurgenii/ImageWithFallback';
+import { ImageWithFallback } from '@/components/chzh/ImageWithFallback';
 import { formatDuration } from '../utils/time';
 import { apiClient, Playlist, PlaylistDetails } from '../api/client';
 import { toast } from 'sonner';

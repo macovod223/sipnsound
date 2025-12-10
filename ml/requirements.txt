@@ -1,0 +1,16 @@
+# Python зависимости для AI DJ модели
+
+# Flask для API сервиса
+flask>=3.0.0
+
+# Научные вычисления
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+
+# Работа с БД
+psycopg2-binary>=2.9.0
+
+# Утилиты
+python-dateutil>=2.8.0
+

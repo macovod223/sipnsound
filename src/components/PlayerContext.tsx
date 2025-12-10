@@ -24,6 +24,7 @@ export interface Track {
   audioUrl?: string;
   lyricsUrl?: string;
   playsCount?: number;
+  isExplicit?: boolean;
 }
 
 export interface Playlist {
@@ -67,7 +68,7 @@ interface PlayerContextType {
   setVolume: (volume: number) => void;
   volume: number;
   shuffle: boolean;
-  repeat: boolean;
+  repeat: 'off' | 'all' | 'one';
   toggleShuffle: () => void;
   toggleRepeat: () => void;
   openPlaylist: (playlist: Playlist) => void;
@@ -166,7 +167,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [duration, setDuration] = useState(225); // 3:45 default
   const [volume, setVolume] = useState(100);
   const [shuffle, setShuffle] = useState(false);
-  const [repeat, setRepeat] = useState(false);
+  // Repeat: 'off' | 'all' | 'one'
+  const [repeat, setRepeat] = useState<'off' | 'all' | 'one'>('off');
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [likedTracks, setLikedTracks] = useState<Set<string>>(new Set());
   const [likedTracksList, setLikedTracksList] = useState<Track[]>([]);
@@ -205,6 +207,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const repeatRef = useRef(repeat);
   useEffect(() => {
     repeatRef.current = repeat;
+    console.log('[REPEAT] Repeat mode changed:', repeat);
   }, [repeat]);
 
   const nextTrackRef = useRef<() => void>(() => {});
@@ -773,6 +776,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           audioUrl: resolveMediaPath(apiTrack.audioUrl || apiTrack.audioPath),
           lyricsUrl: undefined,
           playsCount: apiTrack.playsCount ?? 0,
+          isExplicit: apiTrack.isExplicit ?? false,
           album: typeof apiTrack.album === 'string' ? apiTrack.album : (apiTrack.album?.title || 'Unknown Album'),
         }));
         
@@ -815,6 +819,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         audioUrl: resolveMediaPath(apiTrack.audioUrl || apiTrack.audioPath),
         lyricsUrl: undefined,
         playsCount: apiTrack.playsCount ?? 0,
+        isExplicit: apiTrack.isExplicit ?? false,
         album: apiTrack.album?.title || 'Unknown Album',
       }));
       setApiTracks(formattedTracks);
@@ -896,6 +901,7 @@ const hydrateTrackDetails = useCallback(
         lyrics: normalizedLyrics.length ? normalizedLyrics : fallback?.lyrics,
         lyricsUrl: fallback?.lyricsUrl,
         playsCount: apiTrack.playsCount ?? fallback?.playsCount,
+        isExplicit: apiTrack.isExplicit ?? fallback?.isExplicit ?? false,
       });
 
       if (normalizedLyrics.length) {
@@ -1048,9 +1054,9 @@ const hydrateTrackDetails = useCallback(
           }
         }
       } else {
-        // Тот же трек, только обновляем громкость
-        // Не вызываем load() или pause() - просто меняем volume
-        activeAudio.volume = volume / 100;
+        // Тот же трек - НЕ обновляем громкость здесь, это делается в отдельном useEffect
+        // Это предотвращает конфликты и лаги
+        console.log('[TRACK_CHANGE] Same track, skipping volume update (handled by volume useEffect)');
       }
     } else {
       activeAudio.pause();
@@ -1058,7 +1064,7 @@ const hydrateTrackDetails = useCallback(
       setCurrentTime(0);
       if (currentTrack?.duration) setDuration(currentTrack.duration);
     }
-  }, [currentTrack?.audioUrl, getActiveAudio, volume]);
+  }, [currentTrack?.audioUrl, getActiveAudio]); // УБРАЛИ volume из зависимостей - громкость обрабатывается отдельным useEffect
 
   // Отдельный useEffect для автоплея - гарантирует запуск при переключении треков
   useEffect(() => {
@@ -1202,6 +1208,14 @@ const hydrateTrackDetails = useCallback(
       return;
     }
     
+    // КРИТИЧНО: Пропускаем если только что изменилась громкость (volume меняется часто при перетаскивании)
+    // Это предотвращает паузу при изменении громкости
+    const volumeChanged = volumeRef.current !== volume;
+    if (volumeChanged) {
+      // Громкость меняется, пропускаем этот цикл - volume useEffect обработает это отдельно
+      return;
+    }
+    
     // Пропускаем play/pause если идет кроссфейд или пропуск загрузки
     // НО: если трек уже играет и мы только что завершили кроссфейд, не сбрасываем isPlaying
     if (isCrossfading.current || skipAudioLoadRef.current) {
@@ -1265,6 +1279,10 @@ const hydrateTrackDetails = useCallback(
         })
           .catch((error) => {
             console.error('[PLAY_PAUSE] Play error:', error);
+            console.log('[PLAY_PAUSE] Setting isPlaying to false due to play error:', {
+              error: error.message,
+              stackTrace: new Error().stack?.split('\n').slice(1, 4).join(' -> '),
+            });
             setIsPlaying(false);
             if (isAutoplay) {
               shouldAutoPlayRef.current = false;
@@ -1302,24 +1320,95 @@ const hydrateTrackDetails = useCallback(
       // Вызываем pause() только если аудио действительно играет
       // pause() возвращает void, не Promise, поэтому не используем .catch()
       if (!activeAudio.paused) {
+        console.log('[PLAY_PAUSE] Pausing audio:', {
+          currentTime: activeAudio.currentTime,
+          duration: activeAudio.duration,
+          volume: activeAudio.volume,
+          stackTrace: new Error().stack?.split('\n').slice(1, 4).join(' -> '),
+        });
         try {
           activeAudio.pause();
+          console.log('[PLAY_PAUSE] Audio paused successfully');
         } catch (error) {
           // Игнорируем ошибки при паузе
           console.error('[PLAY_PAUSE] Pause error:', error);
         }
+      } else {
+        console.log('[PLAY_PAUSE] Audio already paused, skipping pause()');
       }
     }
   }, [isPlaying, currentTrack?.audioUrl, getActiveAudio, currentTime, isAuthenticated, recordPlayHistory]);
 
+  // Обновление громкости - КРИТИЧНО: используем useRef для предотвращения лишних ререндеров
+  const volumeRef = useRef(volume);
+  useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
+
   useEffect(() => {
     const activeAudio = getActiveAudio();
-    if (activeAudio && currentTrack?.audioUrl) {
-      // Обновляем громкость без перезагрузки трека
-      // Не вызываем load() или pause() - просто меняем volume
-      activeAudio.volume = volume / 100;
+    if (!activeAudio || !currentTrack?.audioUrl) return;
+    
+    // КРИТИЧНО: Проверяем, не паузится ли трек при изменении громкости
+    const wasPlaying = !activeAudio.paused;
+    const wasPlayingState = isPlaying;
+    
+    // Логируем изменение громкости для отладки
+    console.log('[VOLUME] Setting volume:', {
+      volume,
+      percentage: volume / 100,
+      audioPaused: activeAudio.paused,
+      wasPlaying,
+      wasPlayingState,
+      audioReadyState: activeAudio.readyState,
+      audioSrc: activeAudio.src?.substring(0, 50),
+      currentTime: activeAudio.currentTime,
+      isPlayingState: isPlaying,
+    });
+    
+    try {
+      // Обновляем громкость БЕЗ вызова любых других методов
+      // ТОЛЬКО меняем volume - это не должно вызывать паузу
+      const targetVolume = volume / 100;
+      
+      // КРИТИЧНО: Просто меняем volume - это НЕ должно вызывать паузу
+      // Если трек играет, он должен продолжить играть
+      activeAudio.volume = targetVolume;
+      
+      // Также обновляем неактивный аудио для кроссфейда
+      const inactiveAudio = getInactiveAudio();
+      if (inactiveAudio && inactiveAudio.src) {
+        inactiveAudio.volume = targetVolume;
+      }
+      
+      // КРИТИЧНО: Проверяем, не паузится ли трек после изменения громкости
+      const isNowPaused = activeAudio.paused;
+      if (wasPlaying && isNowPaused) {
+        console.error('[VOLUME] WARNING: Audio was paused after volume change! Attempting to resume...', {
+          wasPlaying,
+          isNowPaused,
+          volume,
+          wasPlayingState,
+          stackTrace: new Error().stack?.split('\n').slice(1, 6).join(' -> '),
+        });
+        // Пытаемся возобновить воспроизведение, если оно было прервано
+        if (wasPlayingState && activeAudio.readyState >= 2 && !isCrossfading.current) {
+          activeAudio.play().catch((error) => {
+            console.error('[VOLUME] Failed to resume after volume change:', error);
+          });
+        }
+      }
+      
+      console.log('[VOLUME] Volume set successfully:', {
+        activeAudioVolume: activeAudio.volume,
+        inactiveAudioVolume: inactiveAudio?.volume,
+        wasPlaying,
+        isNowPaused,
+      });
+    } catch (error) {
+      console.error('[VOLUME] Error setting volume:', error);
     }
-  }, [volume]);
+  }, [volume, getActiveAudio, getInactiveAudio, currentTrack?.audioUrl]); // УБРАЛИ isPlaying из зависимостей
 
   const setCurrentTrack = (track: Track, playlistName?: string, options?: { keepAudio?: boolean }) => {
     const parsedLyrics = normalizeLyricsInput(track.lyrics);
@@ -1353,6 +1442,9 @@ const hydrateTrackDetails = useCallback(
         setIsPlaying(true);
       } else {
         shouldAutoPlayRef.current = false;
+        console.log('[TOGGLE_PLAY] Setting isPlaying to false (no track):', {
+          stackTrace: new Error().stack?.split('\n').slice(1, 4).join(' -> '),
+        });
         setIsPlaying(false);
       }
       setCurrentTime(0);
@@ -1460,13 +1552,28 @@ const hydrateTrackDetails = useCallback(
     };
 
   const handleEnded = (audio: HTMLAudioElement) => () => {
+      console.log('[REPEAT_ENDED] Track ended event fired:', {
+        audioSrc: audio.src?.substring(0, 50),
+        audioCurrentTime: audio.currentTime,
+        audioDuration: audio.duration,
+        repeatMode: repeatRef.current,
+        isCrossfading: isCrossfading.current,
+        stackTrace: new Error().stack?.split('\n').slice(1, 4).join(' -> '),
+      });
+      
       const activeAudio = getActiveAudio();
-      if (audio !== activeAudio) return;
+      if (audio !== activeAudio) {
+        console.log('[REPEAT_ENDED] Audio is not active, ignoring ended event');
+        return;
+      }
 
       // Если идет кроссфейд, не обрабатываем ended (кроссфейд сам переключит трек)
-      if (isCrossfading.current) return;
+      if (isCrossfading.current) {
+        console.log('[REPEAT_ENDED] Crossfade in progress, skipping ended handler');
+        return;
+      }
 
-      // Gapless: если подготовлен следующий трек — мгновенно переключаемся
+      // Gapless: если подготовлен следующий трек – мгновенно переключаемся
       if (gaplessEnabledRef.current && gaplessNextTrackRef.current && gaplessNextTrackRef.current.audioUrl) {
         const preparedNext = gaplessNextTrackRef.current;
         const inactiveAudio = getInactiveAudio();
@@ -1509,12 +1616,34 @@ const hydrateTrackDetails = useCallback(
       }
 
       // Обычная обработка окончания трека
-      if (repeatRef.current) {
-        audio.currentTime = 0;
-      audio.play().catch(() => setIsPlaying(false));
+      if (repeatRef.current === 'one') {
+        // Повтор одного трека
+        console.log('[REPEAT_ENDED] Repeating current track (repeat one) - resetting to start');
+        try {
+          audio.currentTime = 0;
+          setCurrentTime(0);
+          console.log('[REPEAT_ENDED] Audio currentTime reset to 0, attempting to play');
+          audio.play()
+            .then(() => {
+              console.log('[REPEAT_ENDED] Audio play() successful for repeat one');
+              setIsPlaying(true);
+            })
+            .catch((error) => {
+              console.error('[REPEAT_ENDED] Audio play() failed for repeat one:', error);
+              setIsPlaying(false);
+            });
+        } catch (error) {
+          console.error('[REPEAT_ENDED] Error in repeat one handler:', error);
+          setIsPlaying(false);
+        }
+      } else if (repeatRef.current === 'all') {
+        // Повтор всего плейлиста
+        console.log('[REPEAT_ENDED] Moving to next track (repeat all)');
+        nextTrackRef.current();
       } else {
-        // Если gapless выключен или не подготовлен, запускаем следующий трек
-      nextTrackRef.current();
+        // Без повтора - переходим к следующему треку
+        console.log('[REPEAT_ENDED] Moving to next track (repeat off)');
+        nextTrackRef.current();
       }
     };
 
@@ -1567,7 +1696,8 @@ const hydrateTrackDetails = useCallback(
   };
 
   const nextTrack = useCallback(() => {
-    cancelCrossfade();
+    try {
+      cancelCrossfade();
       // Сначала проверяем очередь
       if (queue.length > 0) {
         const nextQueuedTrack = queue[0];
@@ -1657,6 +1787,9 @@ const hydrateTrackDetails = useCallback(
     // Обновляем индекс для следующего трека
     setCurrentTrackIndex(nextIndex);
     setCurrentTrack(nextTrackToPlay, currentPlaylistName);
+    } catch (error) {
+      console.error('[PLAYER] Error in nextTrack:', error);
+    }
   }, [cancelCrossfade, currentPlaylistName, shuffle, apiTracks, shuffledPlaylist, shuffledPlaylistIndex, queue, currentTrack, currentPlaylistTracks, currentTrackIndex, likedTracksList]);
 
   useEffect(() => {
@@ -1664,7 +1797,8 @@ const hydrateTrackDetails = useCallback(
   }, [nextTrack]);
 
   const previousTrack = useCallback(() => {
-    cancelCrossfade();
+    try {
+      cancelCrossfade();
       let tracksToUse: Track[] = [];
     
     if (currentPlaylistName === 'API Tracks') {
@@ -1741,6 +1875,9 @@ const hydrateTrackDetails = useCallback(
         }
       } else {
         shouldAutoPlayRef.current = false;
+        console.log('[PREV_TRACK] Setting isPlaying to false (no previous track):', {
+          stackTrace: new Error().stack?.split('\n').slice(1, 4).join(' -> '),
+        });
         setIsPlaying(false);
         if (activeAudio && !activeAudio.paused) {
           try {
@@ -1797,6 +1934,9 @@ const hydrateTrackDetails = useCallback(
       setCurrentTrackIndex(prevIndex);
       setCurrentTrack(prevTrack, currentPlaylistName);
     }
+    } catch (error) {
+      console.error('[PLAYER] Error in previousTrack:', error);
+    }
   }, [cancelCrossfade, currentTime, currentTrackIndex, currentPlaylistName, apiTracks, likedTracksList, currentPlaylistTracks, shuffle, shuffledPlaylist, shuffledPlaylistIndex, getActiveAudio, gapless]);
 
   // Цвета всегда используют дефолтные значения Spotify (убрано из useEffect для оптимизации)
@@ -1817,9 +1957,25 @@ const hydrateTrackDetails = useCallback(
       timeIntervalRef.current = window.setInterval(() => {
         setCurrentTime((prev) => {
           if (prev >= duration) {
-            if (repeat) {
+            if (repeat === 'one') {
+              // Повтор одного трека - НЕ обрабатываем здесь, handleEnded обработает
+              // Просто возвращаем 0 для UI, но не останавливаем воспроизведение
+              console.log('[TIME_INTERVAL] Repeat one: track ended, handleEnded will restart', {
+                prev,
+                duration,
+                repeat,
+              });
+              // НЕ вызываем setIsPlaying(false) - handleEnded перезапустит трек
               return 0;
             } else {
+              // Для 'all' и 'off' - останавливаем воспроизведение
+              // Переключение трека обработается в handleEnded
+              console.log('[TIME_INTERVAL] Setting isPlaying to false (track ended):', {
+                prev,
+                duration,
+                repeat,
+                stackTrace: new Error().stack?.split('\n').slice(1, 4).join(' -> '),
+              });
               setIsPlaying(false);
               return prev;
             }
@@ -1935,7 +2091,19 @@ const hydrateTrackDetails = useCallback(
   }, [apiTracks, currentPlaylistName, currentPlaylistTracks, likedTracksList, currentTrack]);
 
   const toggleRepeat = useCallback(() => {
-    setRepeat(prev => !prev);
+    setRepeat(prev => {
+      // Циклическое переключение: off -> all -> one -> off
+      if (prev === 'off') {
+        console.log('[REPEAT] Switching to: all');
+        return 'all';
+      } else if (prev === 'all') {
+        console.log('[REPEAT] Switching to: one');
+        return 'one';
+      } else {
+        console.log('[REPEAT] Switching to: off');
+        return 'off';
+      }
+    });
   }, []);
 
   const openPlaylist = useCallback((playlist: Playlist) => {
@@ -2008,6 +2176,9 @@ const hydrateTrackDetails = useCallback(
       }
     } catch (error) {
       toast.error('Не удалось обновить статус лайка');
+    } finally {
+      // Перезагружаем лайки после изменения для синхронизации
+      await loadLikedTracks();
     }
   }, [currentTrack, likedTracks, likedTracksList, apiTracks, t, loadLikedTracks]);
 
@@ -2018,8 +2189,20 @@ const hydrateTrackDetails = useCallback(
     }
     // Если не нашли по ID, проверяем по названию (для обратной совместимости)
     const track = likedTracksList.find(t => t.id === trackIdOrTitle || t.title === trackIdOrTitle);
-    return track && track.id ? likedTracks.has(track.id) : false;
-  }, [likedTracks, likedTracksList]);
+    if (track && track.id) {
+      return likedTracks.has(track.id);
+    }
+    // Также проверяем в текущем треке
+    if (currentTrack && currentTrack.id && (currentTrack.id === trackIdOrTitle || currentTrack.title === trackIdOrTitle)) {
+      return likedTracks.has(currentTrack.id);
+    }
+    // Проверяем в apiTracks
+    const apiTrack = apiTracks.find(t => t.id === trackIdOrTitle || t.title === trackIdOrTitle);
+    if (apiTrack && apiTrack.id) {
+      return likedTracks.has(apiTrack.id);
+    }
+    return false;
+  }, [likedTracks, likedTracksList, currentTrack, apiTracks]);
 
   const openArtistView = useCallback((artist: string | SelectedArtist) => {
     if (typeof artist === 'string') {
@@ -2156,11 +2339,20 @@ const hydrateTrackDetails = useCallback(
           break;
         case 'r':
         case 'к': // Russian layout: R -> К
-          // R - Toggle repeat
+          // R - Toggle repeat (off -> all -> one -> off)
           e.preventDefault();
           setRepeat((prev) => {
-            const newRepeat = !prev;
-            toast.success(newRepeat ? 'Repeat on' : 'Repeat off', { duration: 1000 });
+            let newRepeat: 'off' | 'all' | 'one';
+            if (prev === 'off') {
+              newRepeat = 'all';
+              toast.success('Repeat all', { duration: 1000 });
+            } else if (prev === 'all') {
+              newRepeat = 'one';
+              toast.success('Repeat one', { duration: 1000 });
+            } else {
+              newRepeat = 'off';
+              toast.success('Repeat off', { duration: 1000 });
+            }
             return newRepeat;
           });
           break;

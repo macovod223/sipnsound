@@ -3801,10 +3801,11 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
 .lyrics-time {
   font-variant-numeric: tabular-nums;
   color: var(--lyrics-muted-2);
-  letter-spacing: 0;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
-  font-size: 14px;
-  font-weight: 400;
+  letter-spacing: 0.01em;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.85;
 }
 
 .lyrics-t1 {
@@ -3846,32 +3847,32 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
 }
 
 #lyrics-seek {
-  --slider-base: var(--lyrics-fg);
-  --slider-fill: var(--lyrics-fg);
+  --slider-base: rgba(255, 255, 255, 0.3);
+  --slider-fill: rgba(255, 255, 255, 0.6);
   appearance: none;
-  background: linear-gradient(to bottom, var(--lyrics-fg), #00000014), linear-gradient(to right, var(--slider-fill) var(--fill, 0%), var(--slider-base) var(--fill, 0%));
-  opacity: .98;
+  background: linear-gradient(to right, var(--slider-fill) var(--fill, 0%), var(--slider-base) var(--fill, 0%));
+  opacity: .9;
   cursor: pointer;
-  border-radius: 14px;
+  border-radius: 2px;
   outline: none;
   width: 100%;
-  height: 5px;
+  height: 4px;
   transition: opacity .2s, height .15s;
   position: relative;
-  box-shadow: inset 0 1px 2.5px #00000059, 0 4px 16px #0003;
+  box-shadow: none;
 }
 
 @supports (color: color-mix(in lab, red, red)) {
   #lyrics-seek {
-    --slider-base: color-mix(in srgb, var(--lyrics-fg) 86%, transparent);
-    --slider-fill: color-mix(in srgb, var(--lyrics-fg) 95%, var(--lyrics-accent) 18%);
-    background: linear-gradient(to bottom, color-mix(in srgb, var(--lyrics-fg) 18%, transparent), #00000014), linear-gradient(to right, var(--slider-fill) var(--fill, 0%), color-mix(in srgb, var(--slider-base) 26%, transparent) var(--fill, 0%));
+    --slider-base: rgba(255, 255, 255, 0.3);
+    --slider-fill: rgba(255, 255, 255, 0.6);
+    background: linear-gradient(to right, var(--slider-fill) var(--fill, 0%), var(--slider-base) var(--fill, 0%));
   }
 }
 
 #lyrics-seek:hover {
   opacity: 1;
-  height: 6px;
+  height: 5px;
 }
 
 #lyrics-seek::-webkit-slider-thumb {
@@ -3880,11 +3881,11 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   opacity: 0;
   background: #fff;
   border-radius: 50%;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   transition: opacity .2s, transform .12s;
-  transform: scale(.85);
-  box-shadow: 0 3px 12px #0006, 0 1px 5px #0000004d;
+  transform: scale(.9);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 #lyrics-seek:hover::-webkit-slider-thumb {
@@ -3893,7 +3894,7 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
 }
 
 #lyrics-seek:active::-webkit-slider-thumb {
-  transform: scale(1.2);
+  transform: scale(1.1);
 }
 
 #lyrics-seek::-moz-range-thumb {
@@ -3938,6 +3939,8 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   place-items: center;
   display: grid;
   transform: translateY(0);
+  text-align: center;
+  justify-items: center;
 }
 
 .lyrics-playFAB {
@@ -4001,6 +4004,22 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   margin-bottom: -2px;
   font-size: 21px;
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  overflow: visible;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.lyrics-title > span {
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: clip;
+  min-width: 0;
+  text-align: center;
 }
 
 .lyrics-artist {
@@ -4009,6 +4028,7 @@ input[type="checkbox"].custom-checkbox:not(:checked) {
   margin-top: -8px;
   font-size: 15px;
   font-weight: 500;
+  text-align: center;
 }
 
 .lyrics-right-col {

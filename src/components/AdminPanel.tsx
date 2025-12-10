@@ -1521,7 +1521,7 @@ export function AdminPanel() {
                         <div className="flex-1 min-w-0">
                           <h4 className="text-white font-medium truncate">{album.title}</h4>
                           <p className="text-sm text-gray-400">
-                            {album.artist.name} • {album.year || '—'} • {album.type === 'album' ? t('albumType') : t('singleType')}
+                            {album.artist.name} • {album.year || '–'} • {album.type === 'album' ? t('albumType') : t('singleType')}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">

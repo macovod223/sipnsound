@@ -1,6 +1,5 @@
 import React, { Component, ReactNode } from 'react';
 import { AlertCircle } from 'lucide-react';
-import { useSettings } from './SettingsContext';
 
 interface Props {
   children: ReactNode;
@@ -43,14 +42,19 @@ class ErrorBoundaryClass extends Component<Props, State> {
 }
 
 function ErrorFallback({ error }: { error: Error | null }) {
-  const { t } = useSettings();
+  // Не используем useSettings() чтобы избежать ошибок если SettingsProvider недоступен
+  // Используем статические переводы
+  const translations: Record<string, string> = {
+    somethingWentWrong: 'Что-то пошло не так',
+    reloadPage: 'Перезагрузить страницу'
+  };
   
   return (
     <div className="flex items-center justify-center min-h-screen bg-[#121212] p-4">
       <div className="max-w-md w-full glass-card rounded-lg p-6 text-center">
         <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
         <h2 className="text-2xl font-bold text-white mb-2">
-          {t('somethingWentWrong') || 'Что-то пошло не так'}
+          {translations.somethingWentWrong}
         </h2>
         <p className="text-gray-400 mb-4">
           {error?.message || 'Произошла непредвиденная ошибка'}
@@ -59,7 +63,7 @@ function ErrorFallback({ error }: { error: Error | null }) {
           onClick={() => window.location.reload()}
           className="bg-[#1ED760] hover:bg-[#1DB954] text-black font-semibold py-2 px-4 rounded-lg transition-colors"
         >
-          {t('reloadPage') || 'Перезагрузить страницу'}
+          {translations.reloadPage}
         </button>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { Home, Library, Settings, Plus, Shield } from 'lucide-react';
 import { useSettings } from './SettingsContext';
 import { useAuth } from './AuthContext';
-import { ImageWithFallback } from '@/components/timurgenii/ImageWithFallback';
+import { ImageWithFallback } from '@/components/chzh/ImageWithFallback';
 
 interface CompactSidebarProps {
   activeView: 'home' | 'library' | 'settings' | 'profile' | 'admin';

@@ -1,8 +1,8 @@
 import { motion } from "motion/react";
 import { Play, Shuffle, Check, ChevronLeft, Search, Loader2 } from "lucide-react";
-import { usePlayer, type Track } from "./PlayerContext";
+import { usePlayer } from "./PlayerContext";
 import { useSettings } from "./SettingsContext";
-import { ImageWithFallback } from "@/components/timurgenii/ImageWithFallback";
+import { ImageWithFallback } from "@/components/chzh/ImageWithFallback";
 import { useState, useEffect, useMemo } from "react";
 import { apiClient } from "../api/client";
 import { resolveAudioUrl, resolveImageUrl } from "@/utils/media";
@@ -36,6 +36,7 @@ interface ArtistDetails {
     image: string;
     audioUrl?: string;
     lyricsUrl?: string;
+    isExplicit?: boolean;
   }>;
   albums: Array<{
     id: string;
@@ -121,6 +122,7 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
             image: resolveImage(track.coverUrl || track.coverPath, resolveImage(details.imageUrl || details.imagePath)),
             audioUrl: resolveAudioUrl(track.audioUrl || track.audioPath),
             lyricsUrl: undefined,
+            isExplicit: track.isExplicit ?? false,
           })),
           albums: (details.albums ?? []).map((album: any) => {
             // Убеждаемся, что тип альбома правильно установлен
@@ -157,6 +159,7 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
           genre: 'Unknown',
           duration: track.duration || 0,
           audioUrl: track.audioUrl,
+          isExplicit: track.isExplicit ?? false,
           playlistTitle: `${transformed.name} • ${t('popularTracks')}`,
         }));
         setCurrentPlaylistTracks(tracksForContext);
@@ -246,6 +249,7 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
         duration: track.duration ?? 0,
         audioUrl: track.audioUrl,
         lyricsUrl: track.lyricsUrl,
+        isExplicit: track.isExplicit ?? false,
         playlistTitle: `${displayArtistName} • ${t('popularTracks')}`,
       });
     }
@@ -274,6 +278,7 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
         duration: track.duration ?? 0,
         audioUrl: track.audioUrl,
         lyricsUrl: track.lyricsUrl,
+        isExplicit: track.isExplicit ?? false,
         playlistTitle: `${displayArtistName} • ${t('popularTracks')}`,
       });
     }
@@ -557,12 +562,14 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <p className="text-white font-medium truncate">{track.title}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-white font-medium truncate">{track.title}</p>
+                    </div>
                     <p className="text-sm text-white/60 truncate">{displayArtistName}</p>
                   </div>
 
                   <div className="hidden md:block w-32 text-sm text-white/60">
-                    {track.playsCount?.toLocaleString("en-US") ?? "—"}
+                    {track.playsCount?.toLocaleString("en-US") ?? "–"}
                   </div>
 
                   <div className="w-20 text-sm text-white/60 flex items-center gap-6">
@@ -636,7 +643,7 @@ export function ArtistView({ onBack, artist }: ArtistViewProps) {
 
                   <h3 className="text-white font-medium truncate">{album.title}</h3>
                   <p className="text-sm text-white/60">
-                    {album.year || "—"} • {album.type === "single" ? t('singleType') : t('albumType')}
+                    {album.year || "–"} • {album.type === "single" ? t('singleType') : t('albumType')}
                   </p>
                 </motion.div>
               ))}

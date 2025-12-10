@@ -1,6 +1,7 @@
 import { Play, Pause, SkipForward, SkipBack, Volume2, Maximize2, Heart, Repeat, Shuffle } from 'lucide-react';
 import { usePlayer } from './PlayerContext';
 import { formatTime } from '../utils/time';
+import { ExplicitBadge } from './ExplicitBadge';
 
 interface NowPlayingProps {
   onQueueToggle: () => void;
@@ -82,14 +83,19 @@ export function NowPlaying({ onQueueToggle, isQueueOpen }: NowPlayingProps) {
 
           {/* Track info */}
           <div className="flex-1 min-w-0">
-            <p 
-              className="text-sm truncate mb-1"
-              style={{ 
-                color: '#ffffff',
-              }}
-            >
-              {currentTrack.title}
-            </p>
+            <div className="flex items-center gap-1.5 mb-1">
+              <p 
+                className="text-sm truncate"
+                style={{ 
+                  color: '#ffffff',
+                }}
+              >
+                {currentTrack.title}
+              </p>
+              {currentTrack.isExplicit && (
+                <ExplicitBadge size="sm" className="flex-shrink-0" />
+              )}
+            </div>
             <button
               onClick={() => {
                 if (currentTrack?.artist) {
@@ -174,12 +180,26 @@ export function NowPlaying({ onQueueToggle, isQueueOpen }: NowPlayingProps) {
             <button 
               onClick={toggleRepeat}
               className={`hidden sm:flex w-8 h-8 items-center justify-center instant-transition gpu-accelerated hover:scale-110 ${
-                repeat ? 'opacity-100' : 'opacity-60 hover:opacity-100'
+                repeat !== 'off' ? 'opacity-100' : 'opacity-60 hover:opacity-100'
               }`}
-              style={repeat ? { color: '#1ED760' } : { color: '#b3b3b3' }}
-              title="Repeat"
+              style={repeat !== 'off' ? { color: '#1ED760' } : { color: '#b3b3b3' }}
+              title={repeat === 'off' ? 'Repeat off' : repeat === 'all' ? 'Repeat all' : 'Repeat one'}
             >
-              <Repeat className="w-4 h-4" />
+              {repeat === 'one' ? (
+                // Repeat one icon - две стрелки (как Repeat) с "1" между ними в скобках
+                <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                  {/* Левая стрелка (повтор влево) - как в обычном Repeat */}
+                  <path d="M3 8L6.5 4.5M3 8L6.5 11.5" fill="none"/>
+                  {/* Правая стрелка (повтор вправо) - как в обычном Repeat */}
+                  <path d="M13 8L9.5 4.5M13 8L9.5 11.5" fill="none"/>
+                  {/* Скобки с "1" в центре между стрелками */}
+                  <path d="M6.2 3.8 L6.8 3.2 L6.8 4.2 L6.2 3.8" fill="currentColor"/>
+                  <path d="M9.8 3.8 L9.2 3.2 L9.2 4.2 L9.8 3.8" fill="currentColor"/>
+                  <text x="8" y="5.2" fontSize="4.2" textAnchor="middle" fill="currentColor" fontWeight="bold" fontFamily="Arial, sans-serif">1</text>
+                </svg>
+              ) : (
+                <Repeat className="w-4 h-4" />
+              )}
             </button>
           </div>
 

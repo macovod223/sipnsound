@@ -205,6 +205,7 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
               audioUrl: resolvedAudioUrl,
               lyrics: trackData?.lyrics,
               lyricsUrl: undefined,
+              isExplicit: trackData?.isExplicit ?? false,
               playlistTitle: 'Search Results',
             },
             'Search Results'
@@ -369,7 +370,9 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
                             </div>
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="truncate" style={{ color: '#ffffff' }}>{item.title}</div>
+                            <div className="flex items-center gap-1.5">
+                              <div className="truncate" style={{ color: '#ffffff' }}>{item.title}</div>
+                            </div>
                             <div className="truncate" style={{ color: '#b3b3b3', fontSize: '14px' }}>{item.subtitle}</div>
                           </div>
                           {item.data?.duration && (
@@ -449,7 +452,9 @@ export function SearchView({ searchQuery, onClose }: SearchViewProps) {
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="truncate" style={{ color: '#ffffff' }}>{item.title}</div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="truncate" style={{ color: '#ffffff' }}>{item.title}</div>
+                      </div>
                       <div className="truncate" style={{ color: '#b3b3b3', fontSize: '14px' }}>{item.subtitle}</div>
                     </div>
                     {item.data?.duration && (

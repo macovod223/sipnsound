@@ -356,9 +356,11 @@ export function LibraryView() {
                   onClick={() => handleTrackPlay(track)}
                   className="text-left w-full"
                 >
-                  <h4 className={`text-sm sm:text-base truncate mb-0.5 ${isCurrentTrack ? 'text-[#1ED760]' : 'text-white'}`}>
-                    {track.title}
-                  </h4>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <h4 className={`text-sm sm:text-base truncate ${isCurrentTrack ? 'text-[#1ED760]' : 'text-white'}`}>
+                      {track.title}
+                    </h4>
+                  </div>
                 </button>
                 <button
                   onClick={(e) => {
@@ -605,9 +607,11 @@ export function LibraryView() {
                   onClick={() => handleTrackPlay(track)}
                   className="text-left w-full"
                 >
-                  <h4 className={`text-sm sm:text-base truncate mb-0.5 ${isCurrentTrack ? 'text-[#1ED760]' : 'text-white'}`}>
-                    {track.title}
-                  </h4>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <h4 className={`text-sm sm:text-base truncate ${isCurrentTrack ? 'text-[#1ED760]' : 'text-white'}`}>
+                      {track.title}
+                    </h4>
+                  </div>
                 </button>
                 <button
                   onClick={(e) => {

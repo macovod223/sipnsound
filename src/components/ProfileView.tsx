@@ -3,7 +3,7 @@ import { ArrowLeft, Camera, User, LogOut } from 'lucide-react';
 import { useSettings } from './SettingsContext';
 import { useAuth } from './AuthContext';
 import { useState, useRef, useEffect } from 'react';
-import { ImageWithFallback } from '@/components/timurgenii/ImageWithFallback';
+import { ImageWithFallback } from '@/components/chzh/ImageWithFallback';
 import { toast } from 'sonner';
 
 export function ProfileView() {

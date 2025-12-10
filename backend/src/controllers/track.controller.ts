@@ -460,6 +460,28 @@ export const recordPlayHistory = asyncHandler(
         throw new AppError('Track not found', 404);
       }
 
+      // Проверяем, не записана ли уже история за последнюю минуту (защита от дубликатов)
+      const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+      const recentHistory = await prisma.playHistory.findFirst({
+        where: {
+          userId: req.user!.id,
+          trackId: id,
+          playedAt: {
+            gte: oneMinuteAgo,
+          },
+        },
+      });
+
+      // Если запись уже есть за последнюю минуту, просто увеличиваем счетчик
+      if (recentHistory) {
+        await prisma.track.update({
+          where: { id },
+          data: { playsCount: { increment: 1 } },
+        });
+        res.json({ message: 'Play history already recorded recently' });
+        return;
+      }
+
       // Используем транзакцию для атомарности операций
       await prisma.$transaction(async (tx) => {
         // Записываем в историю прослушиваний
@@ -482,17 +504,28 @@ export const recordPlayHistory = asyncHandler(
       // Логируем ошибку для отладки
       console.error('[PLAY_HISTORY] Error recording play history:', {
         error: error.message,
+        code: error.code,
         stack: error.stack,
         userId: req.user?.id,
         trackId: id,
       });
       
-      // Если это ошибка Prisma, пробрасываем её дальше
+      // Если это ошибка Prisma P2002 (Unique constraint violation)
       if (error.code === 'P2002') {
-        // Unique constraint violation - возможно, запись уже существует
-        // Это не критично, просто игнорируем
-        res.json({ message: 'Play history already recorded' });
-        return;
+        // Запись уже существует - это не критично, просто увеличиваем счетчик
+        try {
+          await prisma.track.update({
+            where: { id },
+            data: { playsCount: { increment: 1 } },
+          });
+          res.json({ message: 'Play history already recorded' });
+          return;
+        } catch (updateError: any) {
+          console.error('[PLAY_HISTORY] Error updating plays count:', updateError);
+          // Если не удалось обновить счетчик, все равно возвращаем успех
+          res.json({ message: 'Play history already recorded' });
+          return;
+        }
       }
       
       // Для других ошибок пробрасываем дальше

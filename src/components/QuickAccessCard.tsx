@@ -41,7 +41,7 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
       const tracks = response?.tracks || [];
 
       if (!Array.isArray(tracks) || tracks.length === 0) {
-        toast.error('AI DJ не вернул треки');
+        toast.error('AI DJ не вернул треки. Попробуйте позже.');
         return;
       }
 
@@ -71,14 +71,24 @@ export function QuickAccessCard({ title, image, index, type = 'playlist', id, on
           playlistTitle: AI_DJ_PLAYLIST_NAME,
           audioUrl: resolveMediaUrl(track.audioUrl || track.audioPath),
           playsCount: track.playsCount ?? 0,
+          isExplicit: track.isExplicit ?? false,
         };
       });
 
+      console.log('[AI DJ] Нормализовано треков:', normalizedTracks.length);
+      console.log('[AI DJ] Первый трек:', normalizedTracks[0]?.title);
+      
       setCurrentPlaylistTracks(normalizedTracks);
       setCurrentTrack(normalizedTracks[0], AI_DJ_PLAYLIST_NAME);
-      toast.success('AI DJ запущен — подборка готова');
+      toast.success(`AI DJ запущен – ${tracks.length} треков готово`);
     } catch (error: any) {
-      toast.error(error?.message || 'Не удалось запустить AI DJ');
+      console.error('[AI DJ] Ошибка:', error);
+      const errorMessage = error?.message || 'Не удалось запустить AI DJ';
+      if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+        toast.error('Войдите в аккаунт, чтобы использовать AI DJ');
+      } else {
+        toast.error(errorMessage);
+      }
     }
   };
 
